@@ -1,0 +1,22 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Keep generated experiment outputs and downloaded model checkpoints out of Git.
+outputs/**/checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Local logs and secrets.
+*.log
+.env
+

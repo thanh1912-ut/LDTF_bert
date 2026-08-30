@@ -1,0 +1,81 @@
+{
+  "cleaning_version": "prepare_agnews v2 (src/data/scripts/prepare_agnews.py)",
+  "label_mapping": {
+    "0": "World",
+    "1": "Sports",
+    "2": "Business",
+    "3": "Sci/Tech"
+  },
+  "truncation_policy": "tokenizer(truncation=True, max_length=128); longest_first truncation from the right; dynamic per-batch padding",
+  "text_encoding": "single",
+  "checksums": {
+    "train": "61ea2cd6cc4c7075cee1677850705f66deffed377f862a70ed5dee03be82d163",
+    "validation": "985f976b02c995b110e26cf674f0650b7e891f67e5f87c35fd09d8df4861a163"
+  },
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_rows": 107735,
+      "columns": [
+        "label",
+        "label_name",
+        "text",
+        "Title",
+        "Description",
+        "title_raw",
+        "description_raw",
+        "title_clean",
+        "description_clean",
+        "row_id",
+        "text_hash",
+        "near_duplicate_group_id",
+        "Class Index",
+        "original_class_index"
+      ],
+      "class_distribution": {
+        "World": 26974,
+        "Sports": 26965,
+        "Business": 26914,
+        "Sci/Tech": 26882
+      },
+      "missing_text": 0,
+      "exact_duplicate_texts": 0,
+      "conflicting_duplicate_texts": 0
+    },
+    "validation": {
+      "name": "validation",
+      "num_rows": 11971,
+      "columns": [
+        "label",
+        "label_name",
+        "text",
+        "Title",
+        "Description",
+        "title_raw",
+        "description_raw",
+        "title_clean",
+        "description_clean",
+        "row_id",
+        "text_hash",
+        "near_duplicate_group_id",
+        "Class Index",
+        "original_class_index"
+      ],
+      "class_distribution": {
+        "World": 2997,
+        "Sports": 2996,
+        "Business": 2991,
+        "Sci/Tech": 2987
+      },
+      "missing_text": 0,
+      "exact_duplicate_texts": 0,
+      "conflicting_duplicate_texts": 0
+    }
+  },
+  "train_validation_overlap": {
+    "row_id": 0,
+    "text_hash": 0,
+    "near_duplicate_group_id": 0
+  },
+  "official_test": "Not inspected. The official test split is sealed by src.guard and is excluded from this report by design. Train/test overlap statistics were produced by the upstream data pipeline; see src/data/reports/split_overlap_report.json."
+}

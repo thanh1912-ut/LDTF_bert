@@ -1,0 +1,5 @@
+{
+  "seed": 42,
+  "baseline_table": "/Users/lethanh/HocSau_LDTF_BERT/reports/tables/baseline_table.md",
+  "ablation_table": "/Users/lethanh/HocSau_LDTF_BERT/reports/tables/ablation_table.md"
+}
