@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 import numpy as np
 import torch
@@ -28,20 +29,33 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from . import config, guard
+from .dataset import DistributedEvalSampler
+from .distributed import (
+    DistributedContext,
+    all_gather_objects,
+    barrier,
+    broadcast_object,
+    current_context,
+    reduce_maxima,
+    reduce_sums,
+    unwrap_model,
+    wrap_ddp,
+)
 from .metrics import compute_classification_metrics
 from .progress import TrainingReporter
 from .utils import (
     append_jsonl,
     capture_rng_state,
-    get_device,
     restore_rng_state,
     save_json,
     set_seed,
 )
 
 NO_DECAY_SUFFIXES = ("bias", "layernorm.weight", "layer_norm.weight", "ln.weight")
+PROGRESS_SYNC_INTERVAL = 20
 
 
 @dataclass(frozen=True)
@@ -62,6 +76,18 @@ class TrainConfig:
     seed: int = config.SEED
     patience: int = config.EARLY_STOPPING_PATIENCE
     use_amp: bool = True
+    deterministic: bool = True
+    use_fused_optimizer: bool = True
+    global_batch_size: int = config.BATCH_SIZE
+    per_device_batch_size: int = config.BATCH_SIZE
+    global_eval_batch_size: int = config.EVAL_BATCH_SIZE
+    per_device_eval_batch_size: int = config.EVAL_BATCH_SIZE
+    world_size: int = 1
+    num_workers: int = config.NUM_WORKERS
+    pad_to_multiple_of: int | None = None
+    amp_dtype: str = "disabled"
+    distributed_backend: str = "none"
+    device_names: tuple[str, ...] = ()
     data_signature: dict[str, str] = field(default_factory=dict)
     architecture: dict[str, object] = field(default_factory=dict)
 
@@ -77,6 +103,7 @@ class TrainResult:
     history: list[dict[str, float]]
     resumed_from_epoch: int = 0
     total_train_seconds: float = 0.0
+    session_train_seconds: float = 0.0
     peak_vram_gb: float = 0.0
 
 
@@ -105,7 +132,9 @@ def build_optimizer(model: nn.Module, train_config: TrainConfig) -> AdamW:
     once; the invariant is asserted before the optimizer is returned.
     """
     backbone = getattr(model, "backbone", None)
-    backbone_ids = {id(p) for p in backbone.parameters()} if backbone is not None else set()
+    backbone_ids = (
+        {id(p) for p in backbone.parameters()} if backbone is not None else set()
+    )
 
     groups: dict[str, list[nn.Parameter]] = {
         "backbone_decay": [],
@@ -126,7 +155,9 @@ def build_optimizer(model: nn.Module, train_config: TrainConfig) -> AdamW:
 
     expected = {id(p) for p in model.parameters() if p.requires_grad}
     if seen != expected:
-        raise ValueError("Optimizer coverage mismatch: some trainable parameters were skipped.")
+        raise ValueError(
+            "Optimizer coverage mismatch: some trainable parameters were skipped."
+        )
 
     param_groups = [
         {
@@ -154,7 +185,14 @@ def build_optimizer(model: nn.Module, train_config: TrainConfig) -> AdamW:
             "name": "head_no_decay",
         },
     ]
-    return AdamW([group for group in param_groups if group["params"]])
+    active_groups = [group for group in param_groups if group["params"]]
+    parameters = [parameter for group in active_groups for parameter in group["params"]]
+    fused = bool(
+        train_config.use_fused_optimizer
+        and parameters
+        and all(parameter.device.type == "cuda" for parameter in parameters)
+    )
+    return AdamW(active_groups, fused=fused)
 
 
 def build_scheduler(
@@ -173,11 +211,11 @@ def build_scheduler(
     return LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
-def optimizer_coverage_report(model: nn.Module, optimizer: torch.optim.Optimizer) -> dict:
+def optimizer_coverage_report(
+    model: nn.Module, optimizer: torch.optim.Optimizer
+) -> dict:
     """Return a report proving the optimizer covers exactly the trainable set."""
-    in_optimizer = {
-        id(p) for group in optimizer.param_groups for p in group["params"]
-    }
+    in_optimizer = {id(p) for group in optimizer.param_groups for p in group["params"]}
     trainable = {id(p) for p in model.parameters() if p.requires_grad}
     frozen = {id(p) for p in model.parameters() if not p.requires_grad}
     return {
@@ -187,6 +225,20 @@ def optimizer_coverage_report(model: nn.Module, optimizer: torch.optim.Optimizer
         "frozen_in_optimizer": len(frozen & in_optimizer),
         "covered": trainable == in_optimizer and not (frozen & in_optimizer),
     }
+
+
+def _scope_learning_rates(optimizer: torch.optim.Optimizer) -> tuple[float, float]:
+    """Return current ``(backbone, head)`` LRs without relying on group order."""
+
+    named = {
+        str(group.get("name", index)): float(group["lr"])
+        for index, group in enumerate(optimizer.param_groups)
+    }
+    backbone = next(
+        (lr for name, lr in named.items() if name.startswith("backbone")), 0.0
+    )
+    head = next((lr for name, lr in named.items() if name.startswith("head")), 0.0)
+    return backbone, head
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +264,9 @@ def forward_kwargs(batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     return kwargs
 
 
-def _amp_settings(device: torch.device, enabled: bool) -> tuple[torch.dtype, bool, bool]:
+def _amp_settings(
+    device: torch.device, enabled: bool
+) -> tuple[torch.dtype, bool, bool]:
     """Return (dtype, autocast_enabled, needs_grad_scaler) for this device."""
     if not enabled or device.type != "cuda":
         return torch.float32, False, False
@@ -227,17 +281,31 @@ def evaluate_model(
     dataloader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
+    *,
+    distributed_context: DistributedContext | None = None,
+    use_amp: bool = False,
 ) -> dict[str, object]:
-    """Return loss plus classification metrics on a held-out loader."""
+    """Return exact global metrics on a held-out loader.
+
+    In DDP, validation loaders use unequal, non-padding shards. Forward passes
+    therefore bypass the DDP wrapper (whose collectives expect equal step
+    counts), then the small logits/label arrays are gathered across ranks.
+    """
+    context = distributed_context or current_context()
     was_training = model.training
     model.eval()
+    evaluation_model = unwrap_model(model)
+    amp_dtype, autocast_enabled, _ = _amp_settings(device, use_amp)
     total_loss = 0.0
     total_examples = 0
     logits_chunks: list[np.ndarray] = []
     label_chunks: list[np.ndarray] = []
     for batch in dataloader:
         batch = move_batch_to_device(batch, device)
-        logits = model(**forward_kwargs(batch))["logits"]
+        with torch.autocast(
+            device_type=device.type, dtype=amp_dtype, enabled=autocast_enabled
+        ):
+            logits = evaluation_model(**forward_kwargs(batch))["logits"]
         loss = criterion(logits.float(), batch["labels"])
         count = int(batch["labels"].size(0))
         total_loss += float(loss.item()) * count
@@ -246,10 +314,22 @@ def evaluate_model(
         label_chunks.append(batch["labels"].cpu().numpy())
     if was_training:
         model.train()
-    logits_array = np.concatenate(logits_chunks, axis=0)
-    labels_array = np.concatenate(label_chunks, axis=0)
+    local_payload = {
+        "loss_sum": total_loss,
+        "count": total_examples,
+        "logits": np.concatenate(logits_chunks, axis=0) if logits_chunks else None,
+        "labels": np.concatenate(label_chunks, axis=0) if label_chunks else None,
+    }
+    gathered = all_gather_objects(local_payload, context)
+    non_empty = [payload for payload in gathered if payload["count"]]
+    if not non_empty:
+        raise ValueError("Cannot evaluate an empty dataloader.")
+    logits_array = np.concatenate([payload["logits"] for payload in non_empty], axis=0)
+    labels_array = np.concatenate([payload["labels"] for payload in non_empty], axis=0)
     metrics = compute_classification_metrics(logits_array, labels_array)
-    metrics["loss"] = total_loss / max(1, total_examples)
+    global_loss = sum(float(payload["loss_sum"]) for payload in gathered)
+    global_count = sum(int(payload["count"]) for payload in gathered)
+    metrics["loss"] = global_loss / max(1, global_count)
     return metrics
 
 
@@ -303,7 +383,9 @@ def _atomic_save(payload: dict, path: Path, *, attempts: int = 3) -> None:
                     f"({type(error).__name__}); retry {attempt}/{attempts - 1}",
                     flush=True,
                 )
-    raise RuntimeError(f"Could not write checkpoint {path}: {last_error}") from last_error
+    raise RuntimeError(
+        f"Could not write checkpoint {path}: {last_error}"
+    ) from last_error
 
 
 def build_best_payload(
@@ -312,8 +394,10 @@ def build_best_payload(
     *,
     epoch: int,
     metrics: dict[str, float],
+    fused_optimizer: bool | None = None,
 ) -> dict:
     """Return the slim publication checkpoint (no optimizer state)."""
+    model = unwrap_model(model)
     architecture = train_config.architecture or (
         model.architecture_config() if hasattr(model, "architecture_config") else {}
     )
@@ -330,6 +414,26 @@ def build_best_payload(
             "warmup_ratio": train_config.warmup_ratio,
             "grad_accum_steps": train_config.grad_accum_steps,
             "freeze_backbone": train_config.freeze_backbone,
+            "global_batch_size": train_config.global_batch_size,
+            "per_device_batch_size": train_config.per_device_batch_size,
+            "global_eval_batch_size": train_config.global_eval_batch_size,
+            "per_device_eval_batch_size": train_config.per_device_eval_batch_size,
+            "effective_global_batch_size": (
+                train_config.global_batch_size * train_config.grad_accum_steps
+            ),
+            "world_size": train_config.world_size,
+            "distributed_backend": train_config.distributed_backend,
+            "device_names": train_config.device_names,
+            "num_workers_per_rank": train_config.num_workers,
+            "amp_requested": train_config.use_amp,
+            "amp_dtype": train_config.amp_dtype,
+            "deterministic": train_config.deterministic,
+            "pad_to_multiple_of": train_config.pad_to_multiple_of,
+            "fused_optimizer": (
+                train_config.use_fused_optimizer
+                if fused_optimizer is None
+                else fused_optimizer
+            ),
         },
         "best_metrics": metrics,
         "epoch": epoch,
@@ -353,8 +457,11 @@ def build_last_payload(
     patience_counter: int,
     history: list[dict[str, float]],
     loader_generator_state: torch.Tensor | None,
+    total_train_seconds: float,
+    distributed_runtime_states: list[dict] | None = None,
 ) -> dict:
     """Return the fully resumable checkpoint."""
+    model = unwrap_model(model)
     return {
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
@@ -368,7 +475,12 @@ def build_last_payload(
         "history": history,
         "rng_state": capture_rng_state(),
         "loader_generator_state": loader_generator_state,
-        "train_config": {**asdict(train_config), "output_dir": str(train_config.output_dir)},
+        "total_train_seconds": total_train_seconds,
+        "distributed_runtime_states": distributed_runtime_states,
+        "train_config": {
+            **asdict(train_config),
+            "output_dir": str(train_config.output_dir),
+        },
         "data_signature": train_config.data_signature,
         "seed": train_config.seed,
     }
@@ -392,6 +504,7 @@ def train_model(
     resume: bool = False,
     reporter: TrainingReporter | None = None,
     show_progress: bool = False,
+    distributed_context: DistributedContext | None = None,
 ) -> TrainResult:
     """Train *model*, selecting the checkpoint by validation macro F1.
 
@@ -406,34 +519,88 @@ def train_model(
                 "The official test split must never enter training."
             )
 
-    set_seed(train_config.seed)
+    context = distributed_context or current_context()
+    if train_config.world_size != context.world_size:
+        raise ValueError(
+            f"TrainConfig world_size={train_config.world_size} but runtime world_size="
+            f"{context.world_size}."
+        )
+    if context.enabled:
+        if getattr(train_loader, "world_size", None) != context.world_size:
+            raise ValueError("The training loader lacks matching distributed metadata.")
+        if getattr(val_loader, "world_size", None) != context.world_size:
+            raise ValueError(
+                "The validation loader lacks matching distributed metadata."
+            )
+        if not isinstance(train_loader.sampler, DistributedSampler):
+            raise ValueError("DDP training requires a torch DistributedSampler.")
+        if not isinstance(val_loader.sampler, DistributedEvalSampler):
+            raise ValueError(
+                "DDP validation requires the exact non-padding DistributedEvalSampler."
+            )
+        if (
+            getattr(train_loader, "global_batch_size", None)
+            != train_config.global_batch_size
+            or getattr(train_loader, "per_device_batch_size", None)
+            != train_config.per_device_batch_size
+        ):
+            raise ValueError(
+                "The distributed loader batch contract differs from TrainConfig."
+            )
+        if (
+            getattr(val_loader, "global_batch_size", None)
+            != train_config.global_eval_batch_size
+            or getattr(val_loader, "per_device_batch_size", None)
+            != train_config.per_device_eval_batch_size
+        ):
+            raise ValueError(
+                "The distributed validation batch contract differs from TrainConfig."
+            )
+
+    # The model has already been constructed from the common seed. Offset the
+    # runtime RNG so dropout masks differ across ranks while remaining
+    # reproducible for a given rank/world-size configuration.
+    set_seed(train_config.seed + context.rank, deterministic=train_config.deterministic)
     output_dir = Path(train_config.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if context.is_main:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    barrier(context)
     best_path = output_dir / "best.pt"
     last_path = output_dir / "last.pt"
     log_path = output_dir / "train_log.jsonl"
+    official_test_paths = (
+        output_dir / "test_metrics.json",
+        output_dir / "test_predictions.npz",
+    )
 
-    device = get_device()
-    model.to(device)
+    device = context.device
+    base_model = unwrap_model(model)
+    base_model.to(device)
 
     # Freeze BEFORE the optimizer is built, so frozen tensors never enter it.
-    if train_config.freeze_backbone and hasattr(model, "freeze_backbone"):
-        model.freeze_backbone()
+    if train_config.freeze_backbone and hasattr(base_model, "freeze_backbone"):
+        base_model.freeze_backbone()
 
     criterion = nn.CrossEntropyLoss(label_smoothing=train_config.label_smoothing)
     eval_criterion = nn.CrossEntropyLoss()
-    optimizer = build_optimizer(model, train_config)
+    optimizer = build_optimizer(base_model, train_config)
 
-    accum = max(1, train_config.grad_accum_steps)
+    if train_config.grad_accum_steps < 1:
+        raise ValueError("grad_accum_steps must be at least 1.")
+    accum = train_config.grad_accum_steps
     num_batches = len(train_loader)
     steps_per_epoch = max(1, math.ceil(num_batches / accum))
     total_steps = steps_per_epoch * train_config.epochs
     scheduler = build_scheduler(optimizer, train_config, total_steps)
 
-    amp_dtype, autocast_enabled, needs_scaler = _amp_settings(device, train_config.use_amp)
+    amp_dtype, autocast_enabled, needs_scaler = _amp_settings(
+        device, train_config.use_amp
+    )
     scaler = torch.amp.GradScaler(device.type, enabled=needs_scaler)
 
-    if reporter is None and show_progress:
+    if not context.is_main:
+        reporter = None
+    if reporter is None and show_progress and context.is_main:
         reporter = TrainingReporter(
             train_config.run_id,
             total_epochs=train_config.epochs,
@@ -441,23 +608,123 @@ def train_model(
         )
 
     history: list[dict[str, float]] = []
-    best_metrics: dict[str, float] = {"f1_macro": -1.0, "accuracy": -1.0, "loss": float("inf")}
+    best_metrics: dict[str, float] = {
+        "f1_macro": -1.0,
+        "accuracy": -1.0,
+        "loss": float("inf"),
+    }
     best_epoch = -1
     patience_counter = 0
     global_step = 0
     start_epoch = 0
+    prior_train_seconds = 0.0
     generator = getattr(train_loader, "generator", None)
 
-    if resume and last_path.exists():
+    resume_available = bool(last_path.exists()) if context.is_main else False
+    resume_available = bool(broadcast_object(resume_available, context))
+    will_resume = resume and resume_available
+    official_test_exists = (
+        any(path.exists() for path in official_test_paths) if context.is_main else False
+    )
+    official_test_exists = bool(broadcast_object(official_test_exists, context))
+    if official_test_exists:
+        raise RuntimeError(
+            "Refusing to train a run that already has official-test artifacts. "
+            "Use a new output directory/run id so test results cannot be mixed with "
+            "a changed checkpoint."
+        )
+    if context.is_main and not will_resume:
+        # Preserve a prior attempt while preventing stale checkpoints/log rows
+        # from being mistaken for the fresh run if it fails before epoch one.
+        stale_paths = [
+            path
+            for path in (
+                best_path,
+                last_path,
+                log_path,
+                output_dir / "val_metrics.json",
+                output_dir / "run_summary.json",
+            )
+            if path.exists()
+        ]
+        if stale_paths:
+            archive_dir = (
+                output_dir
+                / "previous_runs"
+                / (
+                    f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
+                )
+            )
+            archive_dir.mkdir(parents=True, exist_ok=False)
+            for stale_path in stale_paths:
+                stale_path.replace(archive_dir / stale_path.name)
+    barrier(context)
+    if will_resume:
         checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
         signature = checkpoint.get("data_signature", {})
-        if signature and train_config.data_signature and signature != train_config.data_signature:
+        if (
+            signature
+            and train_config.data_signature
+            and signature != train_config.data_signature
+        ):
             raise RuntimeError(
                 "Refusing to resume: the checkpoint's data signature differs from the "
                 "current data."
             )
-        model.load_state_dict(checkpoint["model_state_dict"])
-        model.to(device)
+        saved_runtime_states = checkpoint.get("distributed_runtime_states")
+        if (
+            saved_runtime_states is not None
+            and len(saved_runtime_states) != context.world_size
+        ):
+            raise RuntimeError(
+                "Refusing exact resume: checkpoint world size differs from the current "
+                f"runtime ({len(saved_runtime_states)} != {context.world_size})."
+            )
+        saved_config = checkpoint.get("train_config", {})
+        saved_world_size = int(saved_config.get("world_size", 1))
+        if saved_runtime_states is None and saved_world_size != context.world_size:
+            raise RuntimeError(
+                "Refusing exact resume: the legacy checkpoint was created with a "
+                "different world size."
+            )
+        exact_resume_fields = (
+            "seed",
+            "epochs",
+            "backbone_learning_rate",
+            "head_learning_rate",
+            "weight_decay",
+            "warmup_ratio",
+            "max_grad_norm",
+            "world_size",
+            "global_batch_size",
+            "per_device_batch_size",
+            "global_eval_batch_size",
+            "per_device_eval_batch_size",
+            "grad_accum_steps",
+            "label_smoothing",
+            "freeze_backbone",
+            "patience",
+            "use_amp",
+            "deterministic",
+            "use_fused_optimizer",
+            "num_workers",
+            "pad_to_multiple_of",
+            "amp_dtype",
+            "distributed_backend",
+            "device_names",
+            "architecture",
+        )
+        for field_name in exact_resume_fields:
+            if field_name in saved_config and saved_config[field_name] != getattr(
+                train_config, field_name
+            ):
+                raise RuntimeError(
+                    "Refusing exact resume: training protocol field "
+                    f"{field_name!r} changed from {saved_config[field_name]!r} to "
+                    f"{getattr(train_config, field_name)!r}."
+                )
+        base_model.load_state_dict(checkpoint["model_state_dict"])
+        base_model.to(device)
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         scaler.load_state_dict(checkpoint["scaler_state_dict"])
@@ -467,36 +734,77 @@ def train_model(
         best_epoch = int(checkpoint["best_epoch"])
         patience_counter = int(checkpoint["patience_counter"])
         history = list(checkpoint["history"])
-        restore_rng_state(checkpoint["rng_state"])
-        if generator is not None and checkpoint.get("loader_generator_state") is not None:
-            generator.set_state(checkpoint["loader_generator_state"])
-        print(f"[train] resumed {train_config.run_id} from epoch {start_epoch}", flush=True)
+        prior_train_seconds = float(
+            checkpoint.get(
+                "total_train_seconds",
+                sum(float(record.get("epoch_time_sec", 0.0)) for record in history),
+            )
+        )
+        runtime_state = (
+            saved_runtime_states[context.rank]
+            if saved_runtime_states is not None
+            else {
+                "rng_state": checkpoint["rng_state"],
+                "loader_generator_state": checkpoint.get("loader_generator_state"),
+            }
+        )
+        restore_rng_state(runtime_state["rng_state"])
+        if (
+            generator is not None
+            and runtime_state.get("loader_generator_state") is not None
+        ):
+            generator.set_state(runtime_state["loader_generator_state"])
+        if context.is_main:
+            print(
+                f"[train] resumed {train_config.run_id} from epoch {start_epoch}",
+                flush=True,
+            )
+
+    training_model = wrap_ddp(base_model, context)
 
     resumed_from = start_epoch
+    resume_reached_early_stop = bool(
+        will_resume
+        and train_config.patience > 0
+        and patience_counter >= train_config.patience
+    )
+    if resume_reached_early_stop and context.is_main:
+        print(
+            f"[train] {train_config.run_id} had already met early stopping at "
+            f"epoch {start_epoch}; no additional epoch will run",
+            flush=True,
+        )
     run_start = time.perf_counter()
     peak_vram_gb = 0.0
     last_confusion: list[list[int]] | None = None
     if reporter is not None:
         reporter.start(
-            parameter_counts=count_model_parameters(model),
+            parameter_counts=count_model_parameters(base_model),
             extra=(
                 f"{'frozen' if train_config.freeze_backbone else 'fine-tuned'} backbone, "
-                f"seed {train_config.seed}, {device.type}"
+                f"seed {train_config.seed}, {device.type}, world {context.world_size}"
             ),
         )
     guard.begin_training()
     try:
-        for epoch in range(start_epoch + 1, train_config.epochs + 1):
+        epoch_range = (
+            range(0)
+            if resume_reached_early_stop
+            else range(start_epoch + 1, train_config.epochs + 1)
+        )
+        for epoch in epoch_range:
+            if isinstance(train_loader.sampler, DistributedSampler):
+                train_loader.sampler.set_epoch(epoch)
             if device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(device)
             epoch_start = time.perf_counter()
 
-            model.train()
-            if train_config.freeze_backbone and hasattr(model, "backbone"):
-                model.backbone.eval()  # keep frozen-backbone dropout disabled
+            training_model.train()
+            if train_config.freeze_backbone and hasattr(base_model, "backbone"):
+                base_model.backbone.eval()  # keep frozen-backbone dropout disabled
 
             optimizer.zero_grad(set_to_none=True)
-            running_loss = 0.0
+            running_loss = torch.zeros((), dtype=torch.float32, device=device)
             running_examples = 0
             skipped_steps = 0
 
@@ -511,22 +819,37 @@ def train_model(
                 group_size = min(accum, num_batches - group_start)
                 is_boundary = ((index + 1) % accum == 0) or ((index + 1) == num_batches)
 
-                with torch.autocast(
-                    device_type=device.type, dtype=amp_dtype, enabled=autocast_enabled
-                ):
-                    logits = model(**forward_kwargs(batch))["logits"]
-                    loss = criterion(logits, batch["labels"])
-                scaler.scale(loss / group_size).backward()
+                sync_context = (
+                    training_model.no_sync()
+                    if context.enabled and not is_boundary
+                    else nullcontext()
+                )
+                with sync_context:
+                    with torch.autocast(
+                        device_type=device.type,
+                        dtype=amp_dtype,
+                        enabled=autocast_enabled,
+                    ):
+                        logits = training_model(**forward_kwargs(batch))["logits"]
+                        loss = criterion(logits, batch["labels"])
+                    scaler.scale(loss / group_size).backward()
 
                 count = int(batch["labels"].size(0))
-                running_loss += float(loss.detach().float().item()) * count
+                detached_loss = loss.detach().float()
+                running_loss.add_(detached_loss * count)
                 running_examples += count
 
                 if reporter is not None:
+                    backbone_lr, head_lr = _scope_learning_rates(optimizer)
+                    should_sync_loss = (
+                        index == 0
+                        or (index + 1) % PROGRESS_SYNC_INTERVAL == 0
+                        or (index + 1) == num_batches
+                    )
                     reporter.batch(
-                        float(loss.detach().float().item()),
-                        float(optimizer.param_groups[0]["lr"]),
-                        float(optimizer.param_groups[-1]["lr"]),
+                        float(detached_loss.item()) if should_sync_loss else None,
+                        backbone_lr,
+                        head_lr,
                     )
 
                 if not is_boundary:
@@ -538,11 +861,12 @@ def train_model(
                     max_norm=train_config.max_grad_norm,
                 )
                 if not torch.isfinite(total_norm):
-                    print(
-                        f"[train] non-finite gradient at epoch {epoch} step {index + 1}; "
-                        "skipping optimizer and scheduler step",
-                        flush=True,
-                    )
+                    if context.is_main:
+                        print(
+                            f"[train] non-finite gradient at epoch {epoch} step {index + 1}; "
+                            "skipping optimizer and scheduler step",
+                            flush=True,
+                        )
                     optimizer.zero_grad(set_to_none=True)
                     scaler.update()
                     skipped_steps += 1
@@ -556,7 +880,16 @@ def train_model(
                     global_step += 1
                 optimizer.zero_grad(set_to_none=True)
 
-            validation = evaluate_model(model, val_loader, eval_criterion, device)
+            validation = evaluate_model(
+                training_model,
+                val_loader,
+                eval_criterion,
+                device,
+                distributed_context=context,
+                # Keep validation/model-selection numerically aligned with the
+                # original protocol and with final evaluation (both FP32).
+                use_amp=False,
+            )
             last_confusion = validation.get("confusion_matrix")  # type: ignore[assignment]
             if device.type == "cuda":
                 torch.cuda.synchronize()
@@ -564,21 +897,40 @@ def train_model(
                     peak_vram_gb, torch.cuda.max_memory_allocated(device) / 2**30
                 )
 
+            global_loss_sum, global_examples = reduce_sums(
+                [float(running_loss.item()), float(running_examples)], context
+            )
+            (
+                epoch_seconds,
+                epoch_peak_vram,
+                global_skipped_steps,
+                session_elapsed,
+            ) = reduce_maxima(
+                [
+                    time.perf_counter() - epoch_start,
+                    peak_vram_gb,
+                    float(skipped_steps),
+                    time.perf_counter() - run_start,
+                ],
+                context,
+            )
+            backbone_lr, head_lr = _scope_learning_rates(optimizer)
             record = {
                 "epoch": epoch,
                 "global_step": global_step,
-                "train_loss": running_loss / max(1, running_examples),
+                "train_loss": global_loss_sum / max(1.0, global_examples),
                 "val_loss": float(validation["loss"]),
                 "val_accuracy": float(validation["accuracy"]),
                 "val_f1_macro": float(validation["f1_macro"]),
-                "learning_rate_backbone": float(optimizer.param_groups[0]["lr"]),
-                "learning_rate_head": float(optimizer.param_groups[-1]["lr"]),
-                "epoch_time_sec": round(time.perf_counter() - epoch_start, 2),
-                "peak_vram_gb": round(peak_vram_gb, 4),
-                "skipped_steps": skipped_steps,
+                "learning_rate_backbone": backbone_lr,
+                "learning_rate_head": head_lr,
+                "epoch_time_sec": round(epoch_seconds, 2),
+                "peak_vram_gb": round(epoch_peak_vram, 4),
+                "skipped_steps": int(global_skipped_steps),
             }
             history.append(record)
-            append_jsonl(record, log_path)
+            if context.is_main:
+                append_jsonl(record, log_path)
 
             candidate = {
                 "f1_macro": record["val_f1_macro"],
@@ -590,47 +942,66 @@ def train_model(
                 best_metrics = candidate
                 best_epoch = epoch
                 patience_counter = 0
-                _atomic_save(
-                    build_best_payload(
-                        model, train_config, epoch=epoch, metrics=best_metrics
-                    ),
-                    best_path,
-                )
+                if context.is_main:
+                    _atomic_save(
+                        build_best_payload(
+                            base_model,
+                            train_config,
+                            epoch=epoch,
+                            metrics=best_metrics,
+                            fused_optimizer=bool(
+                                optimizer.defaults.get("fused", False)
+                            ),
+                        ),
+                        best_path,
+                    )
             else:
                 patience_counter += 1
 
-            _atomic_save(
-                build_last_payload(
-                    model,
-                    optimizer,
-                    scheduler,
-                    scaler,
-                    train_config,
-                    epoch=epoch,
-                    global_step=global_step,
-                    best_metrics=best_metrics,
-                    best_epoch=best_epoch,
-                    patience_counter=patience_counter,
-                    history=history,
-                    loader_generator_state=(
-                        generator.get_state() if generator is not None else None
-                    ),
+            local_runtime_state = {
+                "rank": context.rank,
+                "rng_state": capture_rng_state(),
+                "loader_generator_state": (
+                    generator.get_state() if generator is not None else None
                 ),
-                last_path,
-            )
+            }
+            runtime_states = all_gather_objects(local_runtime_state, context)
+            if context.is_main:
+                _atomic_save(
+                    build_last_payload(
+                        base_model,
+                        optimizer,
+                        scheduler,
+                        scaler,
+                        train_config,
+                        epoch=epoch,
+                        global_step=global_step,
+                        best_metrics=best_metrics,
+                        best_epoch=best_epoch,
+                        patience_counter=patience_counter,
+                        history=history,
+                        loader_generator_state=(
+                            generator.get_state() if generator is not None else None
+                        ),
+                        total_train_seconds=prior_train_seconds + session_elapsed,
+                        distributed_runtime_states=runtime_states,
+                    ),
+                    last_path,
+                )
 
-            save_json(
-                {
-                    "run_id": train_config.run_id,
-                    "best_epoch": best_epoch,
-                    "best_metrics": best_metrics,
-                    "history": history,
-                },
-                output_dir / "val_metrics.json",
-            )
+                save_json(
+                    {
+                        "run_id": train_config.run_id,
+                        "best_epoch": best_epoch,
+                        "best_metrics": best_metrics,
+                        "history": history,
+                    },
+                    output_dir / "val_metrics.json",
+                )
+            barrier(context)
             if reporter is not None:
                 reporter.epoch_end(validation, is_best=improved)
-            else:
+            elif context.is_main:
                 print(
                     f"[{train_config.run_id}] epoch {epoch}/{train_config.epochs} "
                     f"train_loss={record['train_loss']:.4f} "
@@ -640,10 +1011,11 @@ def train_model(
                     f"{'  * best' if improved else ''}",
                     flush=True,
                 )
-            if progress_callback is not None:
+            if progress_callback is not None and context.is_main:
                 progress_callback(epoch, record)
             if train_config.patience and patience_counter >= train_config.patience:
-                print(f"[train] early stopping after epoch {epoch}", flush=True)
+                if context.is_main:
+                    print(f"[train] early stopping after epoch {epoch}", flush=True)
                 break
     finally:
         guard.end_training()
@@ -657,6 +1029,10 @@ def train_model(
             confusion_matrix=last_confusion,
         )
 
+    session_train_seconds, peak_vram_gb = reduce_maxima(
+        [time.perf_counter() - run_start, peak_vram_gb], context
+    )
+    total_train_seconds = prior_train_seconds + session_train_seconds
     return TrainResult(
         best_val_f1_macro=float(best_metrics["f1_macro"]),
         best_val_accuracy=float(best_metrics["accuracy"]),
@@ -664,7 +1040,8 @@ def train_model(
         best_epoch=best_epoch,
         history=history,
         resumed_from_epoch=resumed_from,
-        total_train_seconds=round(time.perf_counter() - run_start, 2),
+        total_train_seconds=round(total_train_seconds, 2),
+        session_train_seconds=round(session_train_seconds, 2),
         peak_vram_gb=round(peak_vram_gb, 4),
     )
 
@@ -696,4 +1073,6 @@ def count_model_parameters(model: nn.Module) -> dict[str, object]:
         return model.count_parameters()
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    return {"total": {"total": total, "trainable": trainable, "frozen": total - trainable}}
+    return {
+        "total": {"total": total, "trainable": trainable, "frozen": total - trainable}
+    }

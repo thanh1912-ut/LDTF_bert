@@ -14,7 +14,10 @@ from pathlib import Path
 # Paths
 # ---------------------------------------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT_DIR / "data"
+# Kaggle datasets are mounted read-only under /kaggle/input. Point
+# LDTF_DATA_DIR at a directory containing processed/ to avoid copying them into
+# the repository checkout. The local project layout remains the default.
+DATA_DIR = Path(os.environ.get("LDTF_DATA_DIR", str(ROOT_DIR / "data"))).expanduser()
 PROCESSED_DIR = DATA_DIR / "processed"
 OUTPUTS_DIR = ROOT_DIR / "outputs"
 REPORTS_DIR = ROOT_DIR / "reports"
@@ -89,6 +92,8 @@ INCLUDE_EMBEDDING_LAYER = False
 # ---------------------------------------------------------------------------
 SEED = 42
 SEEDS = (42, 1337, 2024)
+# Global micro-batches. Under torchrun they are divided evenly across ranks,
+# preserving the single-GPU effective-batch protocol.
 BATCH_SIZE = 32
 EVAL_BATCH_SIZE = 64
 EPOCHS = 3

@@ -9,12 +9,16 @@ import torch
 from src import config, guard
 from src.dataset import (
     AgNewsDataset,
+    AgNewsTextDataset,
+    BatchedTokenizingCollator,
+    DistributedEvalSampler,
     DynamicPaddingCollator,
     build_dataloaders,
     build_eval_dataloader,
     build_train_dataloader,
     describe_split,
     load_split,
+    per_device_batch_size,
 )
 
 
@@ -83,6 +87,29 @@ def test_dynamic_padding_pads_to_batch_longest(frame, tokenizer):
     assert batch["input_ids"].shape[1] < config.MAX_LENGTH
 
 
+@pytest.mark.parametrize("text_encoding", ["single", "pair"])
+def test_batched_tokenization_matches_legacy_path(frame, tokenizer, text_encoding):
+    legacy_dataset = AgNewsDataset(frame, tokenizer, text_encoding=text_encoding)
+    legacy = DynamicPaddingCollator(pad_token_id=tokenizer.pad_token_id)(
+        [legacy_dataset[index] for index in range(len(legacy_dataset))]
+    )
+    raw_dataset = AgNewsTextDataset(frame, text_encoding=text_encoding)
+    batched = BatchedTokenizingCollator(tokenizer)(
+        [raw_dataset[index] for index in range(len(raw_dataset))]
+    )
+    assert set(batched) == set(legacy)
+    for key in legacy:
+        assert torch.equal(batched[key], legacy[key]), key
+
+
+def test_batched_tokenizer_can_pad_to_a_multiple(frame, tokenizer):
+    dataset = AgNewsTextDataset(frame)
+    batch = BatchedTokenizingCollator(tokenizer, pad_to_multiple_of=8)(
+        [dataset[index] for index in range(len(dataset))]
+    )
+    assert batch["input_ids"].shape[1] % 8 == 0
+
+
 def test_padding_positions_are_masked_and_marked_special(frame, tokenizer):
     dataset = AgNewsDataset(frame, tokenizer)
     collator = DynamicPaddingCollator(pad_token_id=tokenizer.pad_token_id)
@@ -137,6 +164,57 @@ def test_csv_and_parquet_are_both_supported(frame, tmp_path):
     assert len(load_split(parquet_path)) == len(frame)
 
 
+def test_load_split_projects_only_requested_columns(frame, tmp_path):
+    parquet_path = tmp_path / "split.parquet"
+    frame.to_parquet(parquet_path)
+    projected = load_split(parquet_path, columns=["text", "label"])
+    assert list(projected.columns) == ["text", "label"]
+
+
+def test_global_batch_is_partitioned_exactly():
+    assert per_device_batch_size(32, 1) == 32
+    assert per_device_batch_size(32, 2) == 16
+    with pytest.raises(ValueError, match="not divisible"):
+        per_device_batch_size(31, 2)
+
+
+def test_distributed_eval_sampler_has_exact_disjoint_coverage(frame):
+    dataset = AgNewsTextDataset(frame)
+    left = list(DistributedEvalSampler(dataset, rank=0, world_size=2))
+    right = list(DistributedEvalSampler(dataset, rank=1, world_size=2))
+    assert set(left).isdisjoint(right)
+    assert sorted(left + right) == list(range(len(dataset)))
+
+
+def test_distributed_train_loader_has_equal_shards_and_records_padding(
+    frame, tokenizer
+):
+    odd_frame = pd.concat([frame, frame.iloc[[0]]], ignore_index=True)
+    rank_zero = build_train_dataloader(
+        odd_frame, tokenizer, batch_size=4, seed=11, rank=0, world_size=2
+    )
+    rank_one = build_train_dataloader(
+        odd_frame, tokenizer, batch_size=4, seed=11, rank=1, world_size=2
+    )
+    assert len(rank_zero.sampler) == len(rank_one.sampler)
+    assert rank_zero.per_device_batch_size == 2
+    assert rank_zero.sampler_padding == 1
+
+
+def test_distributed_loader_workers_use_spawn(frame, tokenizer):
+    loader = build_train_dataloader(
+        frame,
+        tokenizer,
+        batch_size=4,
+        seed=11,
+        num_workers=1,
+        rank=0,
+        world_size=2,
+    )
+    assert loader.multiprocessing_context.get_start_method() == "spawn"
+    assert next(iter(loader))["labels"].numel() == 2
+
+
 def test_unsupported_format_is_rejected(tmp_path):
     path = tmp_path / "split.json"
     path.write_text("{}", encoding="utf-8")
@@ -174,7 +252,9 @@ def test_official_test_loader_is_blocked_during_training(tokenizer, monkeypatch)
     monkeypatch.setenv(guard.UNLOCK_ENV_VAR, guard.UNLOCK_TOKEN)
     guard.begin_training()
     try:
-        with pytest.raises(guard.OfficialTestAccessError, match="training loop is active"):
+        with pytest.raises(
+            guard.OfficialTestAccessError, match="training loop is active"
+        ):
             guard.official_test_loader(tokenizer, reason="test", run_id="unit")
     finally:
         guard.end_training()

@@ -67,9 +67,17 @@ class TinyModel(nn.Module):
     def count_parameters(self) -> dict:
         total = sum(p.numel() for p in self.parameters())
         trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        return {"total": {"total": total, "trainable": trainable, "frozen": total - trainable}}
+        return {
+            "total": {
+                "total": total,
+                "trainable": trainable,
+                "frozen": total - trainable,
+            }
+        }
 
-    def forward(self, input_ids, attention_mask, token_type_ids=None, special_tokens_mask=None):
+    def forward(
+        self, input_ids, attention_mask, token_type_ids=None, special_tokens_mask=None
+    ):
         return {"logits": self.classifier(self.backbone(input_ids, attention_mask))}
 
 
@@ -91,7 +99,9 @@ class TinyDataset(Dataset):
         }
 
 
-def make_loader(size: int = 20, batch_size: int = 4, split_name: str = "train") -> DataLoader:
+def make_loader(
+    size: int = 20, batch_size: int = 4, split_name: str = "train"
+) -> DataLoader:
     generator = torch.Generator().manual_seed(0)
     loader = DataLoader(
         TinyDataset(size),
@@ -200,12 +210,20 @@ def test_frozen_parameters_never_enter_the_optimizer(train_config):
 # ---------------------------------------------------------------------------
 # Frozen regime
 # ---------------------------------------------------------------------------
-def test_frozen_backbone_stays_in_eval_mode_and_gets_no_gradient(train_config, tmp_path):
+def test_frozen_backbone_stays_in_eval_mode_and_gets_no_gradient(
+    train_config, tmp_path
+):
     model = TinyModel()
     config_frozen = TrainConfig(
-        output_dir=tmp_path, run_id="frozen", epochs=1, freeze_backbone=True, use_amp=False
+        output_dir=tmp_path,
+        run_id="frozen",
+        epochs=1,
+        freeze_backbone=True,
+        use_amp=False,
     )
-    result = train_model(model, make_loader(), make_loader(split_name="validation"), config_frozen)
+    result = train_model(
+        model, make_loader(), make_loader(split_name="validation"), config_frozen
+    )
     assert result.best_epoch == 1
     assert model.backbone.training is False
     assert all(not p.requires_grad for p in model.backbone.parameters())
@@ -229,7 +247,11 @@ def test_frozen_backbone_weights_do_not_change(tmp_path):
         make_loader(),
         make_loader(split_name="validation"),
         TrainConfig(
-            output_dir=tmp_path, run_id="frozen", epochs=1, freeze_backbone=True, use_amp=False
+            output_dir=tmp_path,
+            run_id="frozen",
+            epochs=1,
+            freeze_backbone=True,
+            use_amp=False,
         ),
     )
     assert torch.equal(before, model.backbone.dense.weight.detach().cpu())
@@ -243,7 +265,11 @@ def test_finetuning_updates_the_backbone(tmp_path):
         make_loader(),
         make_loader(split_name="validation"),
         TrainConfig(
-            output_dir=tmp_path, run_id="ft", epochs=1, freeze_backbone=False, use_amp=False
+            output_dir=tmp_path,
+            run_id="ft",
+            epochs=1,
+            freeze_backbone=False,
+            use_amp=False,
         ),
     )
     assert not torch.equal(before, model.backbone.dense.weight.detach().cpu())
@@ -258,11 +284,33 @@ def test_scheduler_steps_match_ceil_of_batches_over_accumulation(tmp_path, accum
     loader = make_loader(size=20, batch_size=3)  # 7 batches
     model = TinyModel()
     train_config = TrainConfig(
-        output_dir=tmp_path, run_id="accum", epochs=1, grad_accum_steps=accum, use_amp=False
+        output_dir=tmp_path,
+        run_id="accum",
+        epochs=1,
+        grad_accum_steps=accum,
+        use_amp=False,
     )
-    result = train_model(model, loader, make_loader(split_name="validation"), train_config)
+    result = train_model(
+        model, loader, make_loader(split_name="validation"), train_config
+    )
     expected = math.ceil(len(loader) / accum)
     assert result.history[-1]["global_step"] == expected
+
+
+def test_non_positive_accumulation_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="at least 1"):
+        train_model(
+            TinyModel(),
+            make_loader(),
+            make_loader(split_name="validation"),
+            TrainConfig(
+                output_dir=tmp_path,
+                run_id="bad_accum",
+                epochs=1,
+                grad_accum_steps=0,
+                use_amp=False,
+            ),
+        )
 
 
 def test_scheduler_warmup_then_decay(train_config):
@@ -305,7 +353,9 @@ def test_best_checkpoint_is_slim_and_carries_provenance(tmp_path):
         data_signature={"train_sha256": "abc"},
         architecture={"class_name": "TinyModel"},
     )
-    train_model(model, make_loader(), make_loader(split_name="validation"), train_config)
+    train_model(
+        model, make_loader(), make_loader(split_name="validation"), train_config
+    )
     payload = torch.load(tmp_path / "best.pt", map_location="cpu", weights_only=False)
 
     assert "optimizer_state_dict" not in payload
@@ -326,8 +376,12 @@ def test_best_checkpoint_is_slim_and_carries_provenance(tmp_path):
 
 def test_last_checkpoint_is_fully_resumable(tmp_path):
     model = TinyModel()
-    train_config = TrainConfig(output_dir=tmp_path, run_id="ckpt", epochs=2, use_amp=False)
-    train_model(model, make_loader(), make_loader(split_name="validation"), train_config)
+    train_config = TrainConfig(
+        output_dir=tmp_path, run_id="ckpt", epochs=2, use_amp=False
+    )
+    train_model(
+        model, make_loader(), make_loader(split_name="validation"), train_config
+    )
     payload = torch.load(tmp_path / "last.pt", map_location="cpu", weights_only=False)
     for key in (
         "model_state_dict",
@@ -341,8 +395,41 @@ def test_last_checkpoint_is_fully_resumable(tmp_path):
         "history",
         "rng_state",
         "loader_generator_state",
+        "total_train_seconds",
     ):
         assert key in payload, f"last.pt must contain {key}"
+
+
+def test_fresh_run_archives_stale_artifacts_instead_of_mixing_logs(tmp_path):
+    for name in ("best.pt", "last.pt", "val_metrics.json", "run_summary.json"):
+        (tmp_path / name).write_text(f"stale {name}", encoding="utf-8")
+    (tmp_path / "train_log.jsonl").write_text("stale log\n", encoding="utf-8")
+
+    train_model(
+        TinyModel(),
+        make_loader(),
+        make_loader(split_name="validation"),
+        TrainConfig(output_dir=tmp_path, run_id="fresh", epochs=1, use_amp=False),
+    )
+
+    archives = list((tmp_path / "previous_runs").iterdir())
+    assert len(archives) == 1
+    assert (archives[0] / "train_log.jsonl").read_text(
+        encoding="utf-8"
+    ) == "stale log\n"
+    assert "stale" not in (tmp_path / "train_log.jsonl").read_text(encoding="utf-8")
+
+
+def test_training_refuses_a_run_with_official_test_artifacts(tmp_path):
+    (tmp_path / "test_metrics.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="official-test artifacts"):
+        train_model(
+            TinyModel(),
+            make_loader(),
+            make_loader(split_name="validation"),
+            TrainConfig(output_dir=tmp_path, run_id="tested", epochs=1, use_amp=False),
+        )
 
 
 def test_checkpoint_selection_uses_macro_f1_then_loss_then_epoch(tmp_path):
@@ -363,39 +450,129 @@ def test_checkpoint_selection_uses_macro_f1_then_loss_then_epoch(tmp_path):
 def test_resume_restores_state_and_continues(tmp_path):
     torch.manual_seed(0)
     model = TinyModel()
-    short = TrainConfig(output_dir=tmp_path, run_id="resume", epochs=1, use_amp=False)
-    first = train_model(model, make_loader(), make_loader(split_name="validation"), short)
-    assert len(first.history) == 1
+    config_ = TrainConfig(output_dir=tmp_path, run_id="resume", epochs=3, use_amp=False)
+
+    def interrupt_after_epoch_one(epoch, _record):
+        if epoch == 1:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        train_model(
+            model,
+            make_loader(),
+            make_loader(split_name="validation"),
+            config_,
+            progress_callback=interrupt_after_epoch_one,
+        )
+    first_payload = torch.load(
+        tmp_path / "last.pt", map_location="cpu", weights_only=False
+    )
+    assert len(first_payload["history"]) == 1
 
     resumed_model = TinyModel()
-    longer = TrainConfig(output_dir=tmp_path, run_id="resume", epochs=3, use_amp=False)
     second = train_model(
         resumed_model,
         make_loader(),
         make_loader(split_name="validation"),
-        longer,
+        config_,
         resume=True,
     )
     assert second.resumed_from_epoch == 1
     assert [record["epoch"] for record in second.history] == [1, 2, 3]
-    assert second.history[0] == first.history[0], "resumed history must be preserved"
+    assert second.history[0] == first_payload["history"][0], (
+        "resumed history must be preserved"
+    )
+    assert second.total_train_seconds >= first_payload["total_train_seconds"]
+    assert second.total_train_seconds >= second.session_train_seconds
 
 
 def test_resume_does_not_reset_the_best_metric(tmp_path):
     model = TinyModel()
-    base = TrainConfig(output_dir=tmp_path, run_id="resume", epochs=2, use_amp=False)
-    first = train_model(model, make_loader(), make_loader(split_name="validation"), base)
+    base = TrainConfig(output_dir=tmp_path, run_id="resume", epochs=3, use_amp=False)
+
+    def interrupt_after_epoch_two(epoch, _record):
+        if epoch == 2:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        train_model(
+            model,
+            make_loader(),
+            make_loader(split_name="validation"),
+            base,
+            progress_callback=interrupt_after_epoch_two,
+        )
     payload = torch.load(tmp_path / "last.pt", map_location="cpu", weights_only=False)
-    assert payload["best_metrics"]["f1_macro"] == pytest.approx(first.best_val_f1_macro)
+    first_best = payload["best_metrics"]["f1_macro"]
 
     second = train_model(
         TinyModel(),
         make_loader(),
         make_loader(split_name="validation"),
-        TrainConfig(output_dir=tmp_path, run_id="resume", epochs=3, use_amp=False),
+        base,
         resume=True,
     )
-    assert second.best_val_f1_macro >= first.best_val_f1_macro
+    assert second.best_val_f1_macro >= first_best
+
+
+def test_exact_resume_refuses_a_changed_epoch_horizon(tmp_path):
+    train_model(
+        TinyModel(),
+        make_loader(),
+        make_loader(split_name="validation"),
+        TrainConfig(output_dir=tmp_path, run_id="resume", epochs=1, use_amp=False),
+    )
+
+    with pytest.raises(RuntimeError, match="'epochs' changed"):
+        train_model(
+            TinyModel(),
+            make_loader(),
+            make_loader(split_name="validation"),
+            TrainConfig(output_dir=tmp_path, run_id="resume", epochs=2, use_amp=False),
+            resume=True,
+        )
+
+
+def test_resume_does_not_train_past_a_saved_early_stop(tmp_path, monkeypatch):
+    def constant_validation(*_args, **_kwargs):
+        return {
+            "loss": 1.0,
+            "accuracy": 0.25,
+            "f1_macro": 0.1,
+            "confusion_matrix": [[0] * config.NUM_CLASSES] * config.NUM_CLASSES,
+        }
+
+    monkeypatch.setattr("src.train.evaluate_model", constant_validation)
+    config_ = TrainConfig(
+        output_dir=tmp_path,
+        run_id="early-stop",
+        epochs=3,
+        patience=1,
+        use_amp=False,
+    )
+
+    def interrupt_after_stopping_checkpoint(epoch, _record):
+        if epoch == 2:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        train_model(
+            TinyModel(),
+            make_loader(),
+            make_loader(split_name="validation"),
+            config_,
+            progress_callback=interrupt_after_stopping_checkpoint,
+        )
+
+    resumed = train_model(
+        TinyModel(),
+        make_loader(),
+        make_loader(split_name="validation"),
+        config_,
+        resume=True,
+    )
+    assert resumed.resumed_from_epoch == 2
+    assert [record["epoch"] for record in resumed.history] == [1, 2]
 
 
 def test_resume_refuses_a_different_data_signature(tmp_path):
@@ -405,7 +582,10 @@ def test_resume_refuses_a_different_data_signature(tmp_path):
         make_loader(),
         make_loader(split_name="validation"),
         TrainConfig(
-            output_dir=tmp_path, run_id="sig", epochs=1, use_amp=False,
+            output_dir=tmp_path,
+            run_id="sig",
+            epochs=1,
+            use_amp=False,
             data_signature={"train_sha256": "aaa"},
         ),
     )
@@ -415,7 +595,10 @@ def test_resume_refuses_a_different_data_signature(tmp_path):
             make_loader(),
             make_loader(split_name="validation"),
             TrainConfig(
-                output_dir=tmp_path, run_id="sig", epochs=2, use_amp=False,
+                output_dir=tmp_path,
+                run_id="sig",
+                epochs=2,
+                use_amp=False,
                 data_signature={"train_sha256": "bbb"},
             ),
             resume=True,
@@ -483,7 +666,10 @@ def test_evaluation_restores_training_mode():
     model = TinyModel()
     model.train()
     evaluate_model(
-        model, make_loader(split_name="validation"), nn.CrossEntropyLoss(), torch.device("cpu")
+        model,
+        make_loader(split_name="validation"),
+        nn.CrossEntropyLoss(),
+        torch.device("cpu"),
     )
     assert model.training is True
 

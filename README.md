@@ -28,7 +28,8 @@ src/
   config.py            paths, dataset facts, defaults
   variants.py          LdtfVariant — one serializable architecture choice
   registry.py          run id -> model; checkpoint -> model
-  dataset.py           CSV/Parquet, dynamic padding, seeded loaders
+  dataset.py           batched tokenization, dynamic padding, DDP samplers
+  distributed.py       torchrun/DDP runtime and rank-safe collectives
   guard.py             the seal around the official test split
   metrics.py           accuracy, macro F1, McNemar, paired bootstrap
   train.py             optimizer groups, AMP, accumulation, checkpoints, resume
@@ -56,6 +57,8 @@ pip install -r requirements.txt
 
 Expected data at `data/processed/`: `research_train.parquet` (107,735 rows),
 `research_validation.parquet` (11,971), `research_test.parquet` (7,600, sealed).
+On Kaggle, set `LDTF_DATA_DIR=/kaggle/input/<dataset-name>` when that directory
+contains `processed/`; no copy into the repository is required.
 
 ## Running
 
@@ -74,6 +77,62 @@ python -m experiments.run_experiment --run A0 --finetune-backbone
 # resume an interrupted run from last.pt
 python -m experiments.run_experiment --run A0 --resume
 ```
+
+If a run directory already contains artifacts, the single-run entrypoint asks
+for either `--resume` or `--force`; force-started artifacts are moved under that
+run's `previous_runs/` directory instead of being deleted. Suite runs resume an
+incomplete `last.pt` automatically unless `--restart-incomplete` is supplied.
+
+### Kaggle dual T4
+
+The entrypoints auto-detect `torchrun`; no separate DDP flag or shell script is
+needed. `--batch-size` is the **global micro-batch**, so 32 is split into 16
+examples per GPU and preserves the single-GPU protocol. Gradient accumulation
+then gives `effective batch = global batch × accumulation steps`.
+
+In a Kaggle notebook cell:
+
+```python
+!python -m torch.distributed.run --standalone --nproc_per_node=2 \
+    -m experiments.run_experiment --run A0 --batch-size 32 \
+    --eval-batch-size 64 --num-workers 1 --pad-to-multiple-of 8
+```
+
+For a suite, use the same launcher and remove `--continue-on-error`:
+
+```python
+!python -m torch.distributed.run --standalone --nproc_per_node=2 \
+    -m experiments.run_suite --preset core --seed 42 \
+    --batch-size 32 --eval-batch-size 64 --num-workers 1 \
+    --pad-to-multiple-of 8
+```
+
+The T4 training path automatically uses FP16 autocast with gradient scaling and
+fused AdamW; validation/model selection stays FP32 to preserve the original
+protocol. Validation is sharded without padding, so every one of the 11,971 rows is
+counted exactly once. Training uses PyTorch's equal-length distributed sampler;
+because 107,735 is odd, one training index is repeated per epoch and that count
+is recorded as `runtime.train_sampler_padding`.
+
+Start with one loader worker per rank on Kaggle's small CPU allocation; benchmark
+0/1/2 for the actual notebook. `--pad-to-multiple-of 8` is an explicit throughput
+choice and is recorded in every summary/checkpoint. Omit it if strict continuity
+with an older run matters. `--fast-nondeterministic` enables cuDNN autotuning but
+must be applied consistently across every compared run.
+
+`scripts.benchmark_input_pipeline` measures one rank's tokenizer path (use batch
+16 for global batch 32 on two GPUs); it does not emulate two ranks contending for
+the same CPUs. Use `run_summary.json` seconds/epoch for the final 0/1/2-worker
+comparison on the real Kaggle runtime.
+
+Protocol-safe `--resume` requires the same planned epoch count, world size,
+global/per-device batch, accumulation, determinism and padding settings as the
+interrupted run. Once official-test artifacts exist, that run directory is
+immutable for training; use a new output directory/run id for any new fit. A
+slim `best.pt` remains portable to normal single-process inference/evaluation.
+
+Do **not** launch `experiments.final_eval` with `torchrun`; it intentionally
+refuses multi-process execution so the sealed test ledger is touched once.
 
 Run ids: `A0`–`A14` for ablations (`A15` is a regime pair, not an architecture),
 and `B1_bert_frozen_cls`, `B2_bert_finetuned_cls`, `B3_bert_frozen_mean_pool`,
@@ -110,7 +169,8 @@ a router dimension, an epoch, or a seed.
 - **Frozen runs:** backbone `requires_grad=False`, kept in `eval()` so its
   dropout stays off, and absent from the optimizer.
 - **Held constant across runs:** split, cleaner, tokenizer, max length,
-  validation protocol, selection metric, seed, training engine, metrics.
+  validation protocol, selection metric, seed, training engine, metrics, world
+  size, effective global batch and deterministic/throughput settings.
 
 ## Verification
 
@@ -122,6 +182,9 @@ rc=$?; tail -n 20 tests.log; echo "exit=$rc"
 
 python -m scripts.smoke_test > smoke.log 2>&1
 rc=$?; tail -n 40 smoke.log; echo "exit=$rc"
+
+# input-only per-rank benchmark for global batch 32 on T4 x2
+python -m scripts.benchmark_input_pipeline --batch-size 16 --num-workers 1
 
 python -m experiments.export_tables --with-params
 python -m scripts.build_data_report

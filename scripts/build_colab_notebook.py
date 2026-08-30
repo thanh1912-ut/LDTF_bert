@@ -16,11 +16,15 @@ from pathlib import Path
 
 from src import config
 
-REPO_PLACEHOLDER = "https://github.com/USER/HocSau_LDTF_BERT.git"
+REPO_PLACEHOLDER = "https://github.com/thanh1912-ut/LDTF_bert.git"
 
 
 def markdown(text: str) -> dict:
-    return {"cell_type": "markdown", "metadata": {}, "source": text.splitlines(keepends=True)}
+    return {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": text.splitlines(keepends=True),
+    }
 
 
 def code(text: str) -> dict:
@@ -43,6 +47,9 @@ def build_cells() -> list[dict]:
             "Label-Directed Token and Depth Fusion over BERT layers.\n"
             "\n"
             "**Before you start:** set **Runtime -> Change runtime type -> GPU** (T4 is enough).\n"
+            "\n"
+            "This is the single-GPU Colab notebook. For Kaggle T4 x2, use the "
+            "`python -m torch.distributed.run` commands in `README.md`.\n"
             "\n"
             "This notebook trains and validates only. The official test split stays sealed\n"
             "until the final locked evaluation at the end, which is opt-in and logged.\n"
@@ -116,10 +123,7 @@ def build_cells() -> list[dict]:
 
     cells.append(markdown("## 3. Install dependencies"))
     cells.append(
-        code(
-            "!pip install -q -r requirements.txt\n"
-            "print('dependencies installed')\n"
-        )
+        code("!pip install -q -r requirements.txt\nprint('dependencies installed')\n")
     )
 
     cells.append(
@@ -155,11 +159,7 @@ def build_cells() -> list[dict]:
             "Takes about a minute and catches an environment problem before a long run."
         )
     )
-    cells.append(
-        code(
-            "!python -m scripts.smoke_test 2>&1 | tail -n 25\n"
-        )
-    )
+    cells.append(code("!python -m scripts.smoke_test 2>&1 | tail -n 25\n"))
 
     cells.append(
         markdown(
@@ -444,7 +444,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     notebook = build_notebook()
-    args.output.write_text(json.dumps(notebook, indent=1, ensure_ascii=False), encoding="utf-8")
+    args.output.write_text(
+        json.dumps(notebook, indent=1, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"[colab] wrote {args.output} ({len(notebook['cells'])} cells)")
     return 0
 

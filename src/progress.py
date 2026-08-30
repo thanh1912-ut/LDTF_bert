@@ -134,10 +134,11 @@ class BatchProgress:
             )
         return iter(iterable)
 
-    def update(self, loss: float, lr_backbone: float, lr_head: float) -> None:
+    def update(self, loss: float | None, lr_backbone: float, lr_head: float) -> None:
         """Advance the bar by one batch and refresh the running statistics."""
-        self._seen += 1
-        self._running_loss += (loss - self._running_loss) / self._seen
+        if loss is not None:
+            self._seen += 1
+            self._running_loss += (loss - self._running_loss) / self._seen
         if not self.enabled or self._bar is None:
             return
         postfix = (
@@ -175,9 +176,7 @@ class EpochTable:
     def render(self, metrics: dict[str, object], *, is_best: bool = False) -> str:
         """Return the formatted table for one validation pass."""
         width = max(12, max((len(name) for name in self.label_names), default=12) + 2)
-        header = (
-            f"{'Class':>{width}}{'Images':>9}{'P':>9}{'R':>9}{'F1':>9}"
-        )
+        header = f"{'Class':>{width}}{'Images':>9}{'P':>9}{'R':>9}{'F1':>9}"
         lines = [_paint(header, BOLD, enabled=self._colour)]
 
         per_class = metrics.get("per_class", {}) or {}
@@ -193,14 +192,12 @@ class EpochTable:
                 f"{float(entry.get('f1', 0.0)):>9.4f}"
             )
 
-        macro_precision = (
-            sum(float(per_class.get(n, {}).get("precision", 0.0)) for n in self.label_names)
-            / max(1, len(self.label_names))
-        )
-        macro_recall = (
-            sum(float(per_class.get(n, {}).get("recall", 0.0)) for n in self.label_names)
-            / max(1, len(self.label_names))
-        )
+        macro_precision = sum(
+            float(per_class.get(n, {}).get("precision", 0.0)) for n in self.label_names
+        ) / max(1, len(self.label_names))
+        macro_recall = sum(
+            float(per_class.get(n, {}).get("recall", 0.0)) for n in self.label_names
+        ) / max(1, len(self.label_names))
         summary = (
             f"{'all':>{width}}{support_total:>9}"
             f"{macro_precision:>9.4f}{macro_recall:>9.4f}"
@@ -243,7 +240,11 @@ class ConfusionView:
         width = max(8, max((len(name) for name in short), default=8) + 1)
         header = " " * (width + 2) + "".join(f"{name:>{width}}" for name in short)
         lines = [
-            _paint("Confusion matrix (rows = true, columns = predicted)", DIM, enabled=self._colour),
+            _paint(
+                "Confusion matrix (rows = true, columns = predicted)",
+                DIM,
+                enabled=self._colour,
+            ),
             _paint(header, BOLD, enabled=self._colour),
         ]
         for index, row in enumerate(matrix):
@@ -304,7 +305,7 @@ class TrainingReporter:
         """Wrap the training loader for one epoch."""
         return self.bars.epoch(iterable, epoch)
 
-    def batch(self, loss: float, lr_backbone: float, lr_head: float) -> None:
+    def batch(self, loss: float | None, lr_backbone: float, lr_head: float) -> None:
         """Report one optimisation micro-step."""
         self.bars.update(loss, lr_backbone, lr_head)
 
@@ -391,12 +392,15 @@ class SuiteBoard:
 
     def render(self) -> str:
         """Return the leaderboard, best macro F1 first."""
+
         def sort_key(row: dict[str, object]):
             score = row.get("val F1")
             return (0 if score is None else 1, score if score is not None else 0.0)
 
         ordered = sorted(self.rows.values(), key=sort_key, reverse=True)
-        name_width = max(12, max((len(str(row["run"])) for row in ordered), default=12) + 2)
+        name_width = max(
+            12, max((len(str(row["run"])) for row in ordered), default=12) + 2
+        )
         header = (
             f"{'run':<{name_width}}{'status':>10}{'epochs':>8}{'trainable':>14}"
             f"{'val F1':>10}{'val acc':>10}{'time':>10}"
@@ -414,7 +418,11 @@ class SuiteBoard:
                 + _paint(f"{status:>10}", colour, enabled=self._colour)
                 + f"{str(row['epochs']):>8}{str(row['trainable']):>14}"
                 + (f"{score:>10.4f}" if isinstance(score, float) else f"{'-':>10}")
-                + (f"{accuracy:>10.4f}" if isinstance(accuracy, float) else f"{'-':>10}")
+                + (
+                    f"{accuracy:>10.4f}"
+                    if isinstance(accuracy, float)
+                    else f"{'-':>10}"
+                )
                 + f"{str(row['time']):>10}"
             )
         text = "\n".join(lines)

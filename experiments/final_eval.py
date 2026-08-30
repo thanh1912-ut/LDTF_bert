@@ -12,7 +12,7 @@ Every access is appended to ``reports/official_test_access.jsonl``.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+import os
 
 from src import config, guard
 from src.evaluate import evaluate_dataloader, load_model_from_checkpoint
@@ -37,6 +37,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        raise RuntimeError(
+            "Official final evaluation must run once with plain Python, not torchrun."
+        )
     if not guard.is_unlocked():
         raise guard.OfficialTestAccessError(
             "The official test split is sealed. Export "
@@ -53,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         output_dir = config.experiment_output_dir(run_id)
         checkpoint_path = output_dir / "best.pt"
         if not checkpoint_path.exists():
-            raise FileNotFoundError(f"No best.pt found for run {run_id} at {checkpoint_path}.")
+            raise FileNotFoundError(
+                f"No best.pt found for run {run_id} at {checkpoint_path}."
+            )
 
         model, state = load_model_from_checkpoint(checkpoint_path)
         loader = guard.official_test_loader(
