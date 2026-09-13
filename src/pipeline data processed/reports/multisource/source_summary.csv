@@ -1,0 +1,8 @@
+source,stage,rows
+ag_news_train,fixed_input,107735
+ag_news_validation,fixed_input,11971
+ag_news_test,fixed_input,7600
+bbc_news,accepted_by_adapter,1422
+huffpost,accepted_by_adapter,3299
+external,after_quality_filters,4609
+external,selected_for_train,1296

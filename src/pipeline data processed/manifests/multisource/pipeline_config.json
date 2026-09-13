@@ -1,0 +1,57 @@
+{
+  "version": "multisource-v1",
+  "seed": 42,
+  "label_map": {
+    "0": "World",
+    "1": "Sports",
+    "2": "Business",
+    "3": "Sci/Tech"
+  },
+  "sources": {
+    "ag_news": {
+      "train": "../../data/processed/research_train.parquet",
+      "validation": "../../data/processed/research_validation.parquet",
+      "test": "../../data/processed/research_test.parquet"
+    },
+    "bbc_news": {
+      "path": "data/raw/bbc_news/extracted/bbc-text.csv",
+      "label_mapping": {
+        "sport": 1,
+        "business": 2,
+        "tech": 3
+      },
+      "title_word_count": 16
+    },
+    "huffpost": {
+      "path": "data/raw/huffpost/extracted/News_Category_Dataset_v3.json",
+      "accepted_categories": {
+        "WORLD NEWS": 0
+      }
+    }
+  },
+  "sampling": {
+    "maximum_external_rows_per_label": 400,
+    "manual_review_rows_per_source_label": 25
+  },
+  "near_duplicates": {
+    "enabled": true,
+    "threshold": 0.9,
+    "character_ngram_size": 3,
+    "num_permutations": 64,
+    "compare_with_base_train": true
+  },
+  "tokenizer": {
+    "name": "bert-base-uncased",
+    "cache_dir": "data/cache/huggingface",
+    "max_length": 128,
+    "local_files_only": true,
+    "maximum_acceptable_truncation_percentage": 5.0
+  },
+  "outputs": {
+    "standardized": "data/standardized",
+    "merged": "data/merged",
+    "processed": "data/processed",
+    "reports": "reports/multisource",
+    "manifests": "manifests/multisource"
+  }
+}

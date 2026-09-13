@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "tokenizer_name": "bert-base-uncased",
+  "max_length": 128,
+  "rows_checked": 128602,
+  "mean": 53.502,
+  "median": 49.0,
+  "p95": 74.0,
+  "p99": 128.0,
+  "maximum": 3424,
+  "percentage_over_max_length": 1.0,
+  "batch_valid": true
+}

@@ -1,0 +1,13 @@
+split,label,label_name,count
+test,0,World,1900
+test,1,Sports,1900
+test,2,Business,1900
+test,3,Sci/Tech,1900
+train,0,World,27298
+train,1,Sports,27289
+train,2,Business,27238
+train,3,Sci/Tech,27206
+validation,0,World,2997
+validation,1,Sports,2996
+validation,2,Business,2991
+validation,3,Sci/Tech,2987
