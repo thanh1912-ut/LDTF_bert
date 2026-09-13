@@ -1,0 +1,10 @@
+{
+  "maximum_requested_per_label": 400,
+  "selected_per_label": 324,
+  "available_after_quality_filters": {
+    "World": 3296,
+    "Sports": 489,
+    "Business": 500,
+    "Sci/Tech": 324
+  }
+}

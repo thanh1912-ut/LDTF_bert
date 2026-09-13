@@ -1,0 +1,7 @@
+{
+  "python": "3.11.16 (main, Sep  1 2026, 14:15:24) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "pandas": "3.0.5",
+  "numpy": "2.4.6",
+  "pipeline_root": "E:\\Các môn học năm 2\\Học sâu ver 2\\LDTF_bert\\src\\pipeline data processed"
+}

@@ -1,0 +1,17 @@
+split,source_dataset,label,label_name,count
+train,ag_news,0,World,26974
+train,ag_news,1,Sports,26965
+train,ag_news,2,Business,26914
+train,ag_news,3,Sci/Tech,26882
+train,bbc_news,1,Sports,324
+train,bbc_news,2,Business,324
+train,bbc_news,3,Sci/Tech,324
+train,huffpost,0,World,324
+validation,ag_news,0,World,2997
+validation,ag_news,1,Sports,2996
+validation,ag_news,2,Business,2991
+validation,ag_news,3,Sci/Tech,2987
+test,ag_news,0,World,1900
+test,ag_news,1,Sports,1900
+test,ag_news,2,Business,1900
+test,ag_news,3,Sci/Tech,1900

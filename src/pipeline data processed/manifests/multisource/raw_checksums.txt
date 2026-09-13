@@ -1,0 +1,5 @@
+61ea2cd6cc4c7075cee1677850705f66deffed377f862a70ed5dee03be82d163  ag_news_train  E:\Các môn học năm 2\Học sâu ver 2\LDTF_bert\data\processed\research_train.parquet
+985f976b02c995b110e26cf674f0650b7e891f67e5f87c35fd09d8df4861a163  ag_news_validation  E:\Các môn học năm 2\Học sâu ver 2\LDTF_bert\data\processed\research_validation.parquet
+eb409699b69f5308d57f32e808293a8c27d3b271d35b9f8b46c73bb5005e594b  ag_news_test  E:\Các môn học năm 2\Học sâu ver 2\LDTF_bert\data\processed\research_test.parquet
+fdaee0f7451cd8db2709d00e992886fe1c387ee332b8c7b7c1554ed3d3e3382e  bbc_news  E:\Các môn học năm 2\Học sâu ver 2\LDTF_bert\src\pipeline data processed\data\raw\bbc_news\extracted\bbc-text.csv
+2cfc51fa4a82a96ecbe251fa383737aa1dea2e0a517f61dece633fcc25a4a065  huffpost  E:\Các môn học năm 2\Học sâu ver 2\LDTF_bert\src\pipeline data processed\data\raw\huffpost\extracted\News_Category_Dataset_v3.json

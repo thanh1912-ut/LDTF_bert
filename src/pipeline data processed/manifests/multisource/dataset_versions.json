@@ -1,0 +1,16 @@
+{
+  "pipeline_version": "multisource-v1",
+  "config_sha256": "204c9b3f8b3d330b78d9629b39a18ea5c7f3cd3ee700185220ab1b2213e8d341",
+  "input_sha256": {
+    "ag_news_train": "61ea2cd6cc4c7075cee1677850705f66deffed377f862a70ed5dee03be82d163",
+    "ag_news_validation": "985f976b02c995b110e26cf674f0650b7e891f67e5f87c35fd09d8df4861a163",
+    "ag_news_test": "eb409699b69f5308d57f32e808293a8c27d3b271d35b9f8b46c73bb5005e594b",
+    "bbc_news": "fdaee0f7451cd8db2709d00e992886fe1c387ee332b8c7b7c1554ed3d3e3382e",
+    "huffpost": "2cfc51fa4a82a96ecbe251fa383737aa1dea2e0a517f61dece633fcc25a4a065"
+  },
+  "output_sha256": {
+    "train": "de4bddafcc5449b16a1c63b4dd89488c2ef15906194984b51812070e540d0601",
+    "validation": "78d96c6a809123ce4b0fed35d153939f3fc068dd0dcf139221faec3caec63fca",
+    "test": "ee6bad1e03b7cb2a71f1df88e91249d16c77b403339be867972b309217e0d797"
+  }
+}

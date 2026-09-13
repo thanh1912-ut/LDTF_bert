@@ -1,0 +1,7 @@
+{
+  "external_exact_evaluation_overlaps_removed": 0,
+  "external_near_evaluation_overlaps_removed": 0,
+  "external_evaluation_overlaps_remaining": 0,
+  "validation_fingerprint_preserved": true,
+  "test_fingerprint_preserved": true
+}

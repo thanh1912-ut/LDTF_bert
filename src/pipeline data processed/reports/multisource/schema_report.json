@@ -1,0 +1,39 @@
+{
+  "adapter_reports": {
+    "bbc_news": {
+      "input_rows": 2225,
+      "accepted_rows": 1422,
+      "excluded_category_rows": 803,
+      "empty_source_rows": 0
+    },
+    "huffpost": {
+      "input_rows": 209527,
+      "accepted_rows": 3299,
+      "excluded_category_rows": 206228,
+      "empty_source_rows": 0
+    }
+  },
+  "standard_columns": [
+    "row_id",
+    "source_dataset",
+    "source_id",
+    "source_split",
+    "original_label",
+    "source_category",
+    "title_raw",
+    "description_raw",
+    "text_raw",
+    "label",
+    "label_name",
+    "title_clean",
+    "description_clean",
+    "text",
+    "text_hash"
+  ],
+  "empty_rows_removed": 0,
+  "input_rows": {
+    "train": 107735,
+    "validation": 11971,
+    "test": 7600
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "overall_status": "PASS",
+  "status_scope": "automated_technical_checks",
+  "ready_for_training": true,
+  "manual_label_review_required_before_release": true,
+  "checks": {
+    "source_adapters_loaded_rows": true,
+    "required_columns_present": true,
+    "labels_valid": true,
+    "row_ids_unique_per_split": true,
+    "text_nonempty": true,
+    "cleaning_artifacts_zero": true,
+    "train_exact_duplicates_zero": true,
+    "introduced_exact_evaluation_overlap_zero": true,
+    "introduced_near_evaluation_overlap_zero": true,
+    "external_labels_balanced": true,
+    "validation_preserved": true,
+    "test_preserved": true,
+    "tokenizer_loaded": true,
+    "tokenizer_matches_model": true,
+    "truncation_rate_acceptable": true,
+    "batch_valid": true,
+    "manifest_counts_match": true
+  },
+  "counts": {
+    "train": 109031,
+    "validation": 11971,
+    "test": 7600
+  },
+  "external_selected_by_label": {
+    "World": 324,
+    "Sports": 324,
+    "Business": 324,
+    "Sci/Tech": 324
+  },
+  "introduced_exact_evaluation_overlaps_removed": 0,
+  "introduced_near_evaluation_overlaps_removed": 0,
+  "evaluation_fingerprints": {
+    "validation": "8ac06001d45a75f978a6734906fb6b31b06c4d0772638ebabab9359e24edc6d8",
+    "test": "3294bf262ac56d4a5ecfabe215a03875e47d662d0e42e36b62803ff6232f2d1e"
+  }
+}
