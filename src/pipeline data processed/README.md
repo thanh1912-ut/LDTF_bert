@@ -1,46 +1,64 @@
-# Multi-source data pipeline
+# Pipeline dữ liệu đa nguồn
 
-This pipeline extends the fixed AG News training split with balanced external
-examples while preserving the existing validation and official test splits.
+Pipeline mở rộng tập train AG News cố định bằng dữ liệu BBC News và HuffPost đã
+lọc, đồng thời giữ nguyên validation và test để các thí nghiệm có thể so sánh
+công bằng.
 
-## Label sources
+## Nguồn nhãn bổ sung
 
-| Normalized label | External source | Accepted source category |
+| Nhãn chung | Nguồn | Chuyên mục được nhận |
 | --- | --- | --- |
 | World | HuffPost | `WORLD NEWS` |
 | Sports | BBC News | `sport` |
 | Business | BBC News | `business` |
 | Sci/Tech | BBC News | `tech` |
 
-The source rules, sample limit, duplicate threshold, and tokenizer settings are
-stored in `configs/pipeline_config.json`.
+Quy tắc nguồn, giới hạn số mẫu, ngưỡng gần trùng và tokenizer nằm trong
+`configs/pipeline_config.json`.
 
-## Run
+## Chạy pipeline
 
-From the `LDTF_bert` project directory on Windows:
+Từ thư mục dự án `LDTF_bert` trên Windows:
 
 ```powershell
 & '.venv/Scripts/python.exe' 'src/pipeline data processed/scripts/run_pipeline.py'
 ```
 
-The command writes model-ready files to `data/processed` inside this pipeline
-directory. It also writes reproducibility manifests and technical audit reports
-under `manifests/multisource` and `reports/multisource`.
+Ba file Parquet sẵn sàng cho model được tạo tại `data/processed` bên trong
+folder pipeline này. Báo cáo nằm tại `reports/multisource`, còn checksum, danh
+sách ID và lịch sử loại hàng nằm tại `manifests/multisource`.
 
-## Train with the generated dataset
+## Dùng dữ liệu mới để huấn luyện
 
-Point the project at this pipeline's data directory before running training:
+Trước khi chạy model, trỏ project đến thư mục data của pipeline:
 
 ```powershell
 $env:LDTF_DATA_DIR = (Resolve-Path -LiteralPath 'src/pipeline data processed/data').Path
 ```
 
-The normal project configuration will then resolve:
+Project sẽ đọc:
 
-- `research_train.parquet`
-- `research_validation.parquet`
-- `research_test.parquet`
+- `research_train.parquet`;
+- `research_validation.parquet`;
+- `research_test.parquet`.
 
-Review `reports/multisource/manual_review_samples.csv` before publishing or
-sharing a new dataset version. Automated checks are summarized in
+## Trạng thái hiện tại
+
+- Train: 109.031 mẫu, gồm 1.296 mẫu bổ sung cân bằng.
+- Validation: 11.971 mẫu AG News được giữ nguyên.
+- Test: 7.600 mẫu AG News được giữ nguyên.
+- Kiểm tra kỹ thuật tự động: `PASS`.
+- Kiểm thử pipeline đa nguồn: 5/5 đạt.
+
+Trước khi công bố một phiên bản dataset, cần đọc
+`reports/multisource/manual_review_samples.csv`. Báo cáo tự động đầy đủ nằm tại
 `reports/multisource/final_data_report.json`.
+
+## Tài liệu chi tiết
+
+- `../../docs/data/README.md`: index và thứ tự đọc đề xuất;
+- `../../docs/data/DATASET_CARD.md`: thành phần, mục đích và giới hạn dataset;
+- `../../docs/data/DATA_DICTIONARY.md`: ý nghĩa từng cột;
+- `../../docs/data/PROCESSING_PIPELINE.md`: thuật toán và thứ tự xử lý;
+- `../../docs/data/DATA_QUALITY.md`: kết quả kiểm tra chất lượng;
+- `../../docs/data/REPRODUCIBILITY.md`: checksum và cách tái lập.
