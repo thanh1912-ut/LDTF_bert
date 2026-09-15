@@ -55,12 +55,10 @@ docs/                  prior art, traceability, source audit, changelog
 pip install -r requirements.txt
 ```
 
-Dataset AG News nền tại `data/processed/` có 107.735 mẫu train. Pipeline đa
-nguồn tạo phiên bản `multisource-v1` gồm 109.031 mẫu train, 11.971 mẫu
-validation và 7.600 mẫu test tại
-`src/pipeline data processed/data/processed/`. Để dùng phiên bản này, đặt
-`LDTF_DATA_DIR` trỏ tới `src/pipeline data processed/data`. Trên Kaggle,
-`LDTF_DATA_DIR` phải trỏ tới thư mục chứa folder con `processed/`.
+Expected data at `data/processed/`: `research_train.parquet` (107,735 rows),
+`research_validation.parquet` (11,971), `research_test.parquet` (7,600, sealed).
+On Kaggle, set `LDTF_DATA_DIR=/kaggle/input/<dataset-name>` when that directory
+contains `processed/`; no copy into the repository is required.
 
 ## Running
 
@@ -113,9 +111,8 @@ The T4 training path automatically uses FP16 autocast with gradient scaling and
 fused AdamW; validation/model selection stays FP32 to preserve the original
 protocol. Validation is sharded without padding, so every one of the 11,971 rows is
 counted exactly once. Training uses PyTorch's equal-length distributed sampler;
-Với baseline 107.735 mẫu hoặc bản đa nguồn 109.031 mẫu, số hàng train đều là số
-lẻ. Distributed sampler lặp một chỉ số mỗi epoch để chia đều cho hai GPU; số
-lượng này được ghi tại `runtime.train_sampler_padding`.
+because 107,735 is odd, one training index is repeated per epoch and that count
+is recorded as `runtime.train_sampler_padding`.
 
 Start with one loader worker per rank on Kaggle's small CPU allocation; benchmark
 0/1/2 for the actual notebook. `--pad-to-multiple-of 8` is an explicit throughput
@@ -218,12 +215,6 @@ Two cautions before interpreting any delta:
 
 ## Documentation
 
-- `docs/data/README.md` — index và thứ tự đọc toàn bộ tài liệu dữ liệu.
-- `docs/data/DATASET_CARD.md` — nguồn, thành phần, mục đích và giới hạn dữ liệu.
-- `docs/data/DATA_DICTIONARY.md` — schema và ý nghĩa từng cột.
-- `docs/data/PROCESSING_PIPELINE.md` — toàn bộ thứ tự và thuật toán xử lý.
-- `docs/data/DATA_QUALITY.md` — kết quả kiểm tra và rủi ro còn lại.
-- `docs/data/REPRODUCIBILITY.md` — cấu hình, checksum và cách tái lập dataset.
 - `docs/prior_art_source_audit.md` — papers and official repositories actually
   retrieved and read, with confidence levels, licenses, and an explicit account
   of what the search did **not** cover.

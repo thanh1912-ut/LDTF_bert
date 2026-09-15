@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "experiment_name": "multisource_v1_core_3seeds",
+  "description": "Ba thành viên train cùng nhóm model trên ba seed; thành viên 4 tổng hợp validation.",
+  "dataset": {
+    "version": "multisource-v1",
+    "drive_processed_subdir": "data/processed",
+    "local_data_root": "/content/ldtf_multisource_v1",
+    "train_file": "research_train.parquet",
+    "validation_file": "research_validation.parquet",
+    "sealed_test_file": "research_test.parquet",
+    "copy_test_for_training": false,
+    "expected_rows": {
+      "train": 109031,
+      "validation": 11971,
+      "test": 7600
+    },
+    "expected_label_counts": {
+      "train": [27298, 27289, 27238, 27206],
+      "validation": [2997, 2996, 2991, 2987]
+    },
+    "sha256": {
+      "research_train.parquet": "de4bddafcc5449b16a1c63b4dd89488c2ef15906194984b51812070e540d0601",
+      "research_validation.parquet": "78d96c6a809123ce4b0fed35d153939f3fc068dd0dcf139221faec3caec63fca"
+    }
+  },
+  "protocol": {
+    "runs": [
+      "B2_bert_finetuned_cls",
+      "A0",
+      "A1",
+      "A3",
+      "A4",
+      "A11"
+    ],
+    "epochs": 3,
+    "batch_size": 32,
+    "eval_batch_size": 64,
+    "grad_accum_steps": 1,
+    "num_workers": 1,
+    "pad_to_multiple_of": 8,
+    "deterministic": true,
+    "selection_metric": "val_f1_macro",
+    "run_smoke_test_once_per_member_and_commit": true,
+    "delete_last_checkpoint_after_success": true
+  },
+  "members": {
+    "1": {
+      "role": "trainer",
+      "seed": 42,
+      "label": "Trainer seed 42"
+    },
+    "2": {
+      "role": "trainer",
+      "seed": 1337,
+      "label": "Trainer seed 1337"
+    },
+    "3": {
+      "role": "trainer",
+      "seed": 2024,
+      "label": "Trainer seed 2024"
+    },
+    "4": {
+      "role": "analyst",
+      "seed": null,
+      "label": "Tổng hợp và phân tích validation"
+    }
+  },
+  "storage": {
+    "results_subdir": "results/multisource_v1_core_3seeds",
+    "analysis_subdir": "analysis/multisource_v1_core_3seeds"
+  }
+}

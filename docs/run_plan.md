@@ -134,7 +134,11 @@ run show `PENDING`; nothing is estimated or back-filled.
 Rough guidance only — measure the first epoch and extrapolate rather than
 trusting these numbers.
 
-- Fine-tuned runs: 3 epochs over 107,735 rows, batch 32 = 3,367 steps/epoch.
+- Baseline AG News: 3 epoch trên 107.735 mẫu, batch toàn cục 32, tương đương
+  3.367 bước mỗi epoch.
+- Bản đa nguồn `multisource-v1`: 3 epoch trên 109.031 mẫu, batch toàn cục 32,
+  tương đương 3.408 bước mỗi epoch. Các mô hình đem so sánh trong cùng một thí
+  nghiệm phải dùng cùng phiên bản dataset.
 - Frozen runs: 10 epochs, but no backward pass through BERT.
 - LDTF variants materialise a `[B, C, L, T]` attention tensor, so they cost
   meaningfully more per step than B1-B4. Reduce `--batch-size` if you hit OOM.
