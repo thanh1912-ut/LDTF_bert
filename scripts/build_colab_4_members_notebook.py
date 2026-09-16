@@ -1,12 +1,4 @@
-"""Generate the shared four-member Google Colab notebook.
-
-Usage::
-
-    python -m scripts.build_colab_4_members_notebook
-
-Edit this generator or configs/colab_4_members.json, then regenerate the
-notebook instead of editing notebook JSON by hand.
-"""
+"""Generate the Colab training notebook used by members 1, 2, and 3."""
 
 from __future__ import annotations
 
@@ -14,656 +6,392 @@ import argparse
 import json
 from pathlib import Path
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT_DIR / "notebooks" / "colab_4_members_multisource.ipynb"
 
 
-def markdown(text: str) -> dict:
-    return {
-        "cell_type": "markdown",
-        "metadata": {},
-        "source": text.splitlines(keepends=True),
-    }
+def markdown(source: str) -> dict:
+    return {"cell_type": "markdown", "metadata": {}, "source": source.splitlines(True)}
 
 
-def code(text: str) -> dict:
-    return {
-        "cell_type": "code",
-        "execution_count": None,
-        "metadata": {},
-        "outputs": [],
-        "source": text.splitlines(keepends=True),
-    }
+def code(source: str) -> dict:
+    return {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}
 
 
 def build_cells() -> list[dict]:
-    cells: list[dict] = []
+    return [
+        markdown("""# LDTF-BERT - Notebook train cho Member 1, 2, 3
 
-    cells.append(
-        markdown(
-            "# LDTF-BERT: 3 thành viên train, 1 thành viên phân tích\n"
-            "\n"
-            "Notebook dùng chung cho bốn thành viên:\n"
-            "\n"
-            "- Member 1: train sáu model với seed `42`;\n"
-            "- Member 2: train sáu model với seed `1337`;\n"
-            "- Member 3: train sáu model với seed `2024`;\n"
-            "- Member 4: kiểm tra và tổng hợp kết quả validation của cả ba seed.\n"
-            "\n"
-            "Ba trainer phải bật **Runtime > Change runtime type > T4 GPU**. "
-            "Member 4 có thể dùng CPU. Notebook không đánh giá tập test.\n"
-        )
+Mỗi người upload nguyên folder `LDTF_4_MEMBERS` vào Google Drive cá nhân, chỉ sửa `MEMBER_ID`, bật **T4 GPU**, rồi chọn **Runtime > Run all**.
+
+- Member 1: `B2_bert_finetuned_cls`, `A0` với seed 42
+- Member 2: `A1`, `A3` với seed 42
+- Member 3: `A4`, `A11` với seed 42
+
+Kết quả được ghi trực tiếp lên Drive. Sau mỗi epoch hoàn tất, `last.pt`, `train_log.jsonl` và `val_metrics.json` được cập nhật. Khi Colab ngắt, Run all lại sẽ tiếp tục từ `last.pt`. Nếu ngắt giữa epoch, epoch đang dở sẽ chạy lại. `best.pt` luôn giữ mô hình có validation Macro F1 tốt nhất. Tập test không được dùng trong notebook này.
+"""),
+        markdown("## 1. Chỉ sửa MEMBER_ID ở cell này"),
+        code("""from tqdm.auto import tqdm
+
+with tqdm(total=1, desc="Cấu hình thành viên", unit="bước") as progress:
+    progress.set_postfix_str("Trạng thái: đang kiểm tra MEMBER_ID")
+    MEMBER_ID = 1  # Chỉ đổi thành 1, 2 hoặc 3
+    MEMBER_DRIVE_ROOT = "/content/drive/MyDrive/LDTF_4_MEMBERS"
+    SOURCE_ARCHIVE_NAME = "LDTF_bert_source.zip"
+    EXTRACT_DIR = "/content/ldtf_source"
+    assert MEMBER_ID in (1, 2, 3), "MEMBER_ID phải là 1, 2 hoặc 3"
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: hoàn tất", refresh=True)
+print("Đã chọn MEMBER_ID =", MEMBER_ID)
+"""),
+        markdown("## 2. Kết nối Drive và nạp source"),
+        code("""from google.colab import drive
+from tqdm.auto import tqdm
+
+with tqdm(total=4, desc="Chuẩn bị source", unit="bước") as progress:
+    progress.set_postfix_str("Trạng thái: đang kết nối Drive")
+    drive.mount("/content/drive")
+    progress.update(1)
+    import hashlib, json, os, shutil, subprocess, sys, zipfile
+    from datetime import datetime, timezone
+    from pathlib import Path
+    MEMBER_ROOT = Path(MEMBER_DRIVE_ROOT)
+    for relative in ("source", "data/processed", "results", "exports"):
+        (MEMBER_ROOT / relative).mkdir(parents=True, exist_ok=True)
+    SOURCE_ARCHIVE = MEMBER_ROOT / "source" / SOURCE_ARCHIVE_NAME
+    assert SOURCE_ARCHIVE.is_file(), f"Thiếu source ZIP: {SOURCE_ARCHIVE}"
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: đang kiểm tra source")
+
+    def sha256_file(path, chunk_size=1024 * 1024):
+        digest = hashlib.sha256()
+        total = max(1, Path(path).stat().st_size)
+        with Path(path).open("rb") as handle, tqdm(total=total, desc=f"SHA256 {Path(path).name}", unit="B", unit_scale=True, leave=False) as bar:
+            bar.set_postfix_str("Trạng thái: đang tính checksum")
+            for chunk in iter(lambda: handle.read(chunk_size), b""):
+                digest.update(chunk)
+                bar.update(len(chunk))
+        return digest.hexdigest()
+
+    SOURCE_SHA256 = sha256_file(SOURCE_ARCHIVE)
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: đang giải nén source")
+    EXTRACT_ROOT = Path(EXTRACT_DIR)
+    if EXTRACT_ROOT.exists():
+        shutil.rmtree(EXTRACT_ROOT)
+    EXTRACT_ROOT.mkdir(parents=True)
+    with zipfile.ZipFile(SOURCE_ARCHIVE) as archive:
+        root = EXTRACT_ROOT.resolve()
+        members = archive.infolist()
+        for item in members:
+            target = (EXTRACT_ROOT / item.filename).resolve()
+            assert target == root or root in target.parents, f"ZIP không an toàn: {item.filename}"
+        for item in tqdm(members, desc="Giải nén source", unit="file", leave=False):
+            archive.extract(item, EXTRACT_ROOT)
+    candidates = [EXTRACT_ROOT] + [p for p in EXTRACT_ROOT.iterdir() if p.is_dir()]
+    PROJECT = next((p for p in candidates if (p / "src").is_dir()), None)
+    assert PROJECT is not None, "Source ZIP không chứa src/"
+    os.chdir(PROJECT)
+    sys.path.insert(0, str(PROJECT))
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: hoàn tất", refresh=True)
+print("Project:", PROJECT)
+print("Source SHA-256:", SOURCE_SHA256)
+"""),
+        markdown("## 3. Cài thư viện và đọc cấu hình chung"),
+        code("""from tqdm.auto import tqdm
+
+with tqdm(total=2, desc="Cài đặt môi trường", unit="bước") as progress:
+    progress.set_postfix_str("Trạng thái: đang cài thư viện")
+    print("Đang cài thư viện. Log pip được hiển thị ngay bên dưới.")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(PROJECT / "requirements.txt")], check=True)
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: đang đọc config")
+    CONFIG_PATH = PROJECT / "configs" / "colab_4_members.json"
+    TEAM_CONFIG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    CONFIG_SHA256 = hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest()
+    MEMBER = TEAM_CONFIG["members"][str(MEMBER_ID)]
+    assert MEMBER["role"] == "trainer"
+    RESULTS_ROOT = MEMBER_ROOT / TEAM_CONFIG["storage"]["results_subdir"]
+    EXPORT_ROOT = MEMBER_ROOT / TEAM_CONFIG["storage"]["exports_subdir"]
+    RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+    EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: hoàn tất", refresh=True)
+print("Phân công:", MEMBER["label"])
+print("Config SHA-256:", CONFIG_SHA256)
+print("Kết quả lưu tại:", RESULTS_ROOT)
+"""),
+        markdown("## 4. Kiểm tra T4 và đưa dữ liệu vào ổ Colab"),
+        code("""from tqdm.auto import tqdm
+import pandas as pd
+import torch
+
+def copy_with_progress(source, destination):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    with source.open("rb") as src, temporary.open("wb") as dst, tqdm(total=source.stat().st_size, desc=f"Copy {source.name}", unit="B", unit_scale=True, leave=False) as bar:
+        bar.set_postfix_str("Trạng thái: đang copy")
+        for chunk in iter(lambda: src.read(4 * 1024 * 1024), b""):
+            dst.write(chunk)
+            bar.update(len(chunk))
+    temporary.replace(destination)
+
+with tqdm(total=4, desc="Kiểm tra GPU và dữ liệu", unit="bước") as progress:
+    progress.set_postfix_str("Trạng thái: đang kiểm tra GPU")
+    assert torch.cuda.is_available(), "Chưa bật GPU: Runtime > Change runtime type > T4 GPU"
+    GPU_NAME = torch.cuda.get_device_name(0)
+    assert "T4" in GPU_NAME.upper(), f"Nhóm yêu cầu T4, hiện tại là {GPU_NAME}"
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: đang chuẩn bị đường dẫn")
+    dataset_cfg = TEAM_CONFIG["dataset"]
+    drive_data = MEMBER_ROOT / dataset_cfg["drive_processed_subdir"]
+    local_root = Path(dataset_cfg["local_data_root"])
+    local_processed = local_root / "processed"
+    local_processed.mkdir(parents=True, exist_ok=True)
+    required = (dataset_cfg["train_file"], dataset_cfg["validation_file"])
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: đang xác minh checksum")
+    for filename in tqdm(required, desc="Xác minh và copy data", unit="file", leave=False):
+        source = drive_data / filename
+        destination = local_processed / filename
+        assert source.is_file(), f"Thiếu dữ liệu: {source}"
+        expected = dataset_cfg["sha256"][filename]
+        assert sha256_file(source) == expected, f"Checksum sai: {source}"
+        if not destination.exists() or sha256_file(destination) != expected:
+            copy_with_progress(source, destination)
+        assert sha256_file(destination) == expected
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: đang kiểm tra số dòng và nhãn")
+    for split, filename in (("train", required[0]), ("validation", required[1])):
+        labels = pd.read_parquet(local_processed / filename, columns=["label"])["label"]
+        counts = labels.value_counts().sort_index().tolist()
+        assert len(labels) == dataset_cfg["expected_rows"][split]
+        assert counts == dataset_cfg["expected_label_counts"][split]
+        print(f"{split}: {len(labels):,} dòng, nhãn {counts}")
+    assert not (local_processed / dataset_cfg["sealed_test_file"]).exists()
+    os.environ["LDTF_DATA_DIR"] = str(local_root)
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: hoàn tất", refresh=True)
+usage = shutil.disk_usage(MEMBER_ROOT)
+print("GPU:", GPU_NAME)
+print(f"Drive còn trống khoảng {usage.free / (1024**3):.2f} GB")
+if usage.free < 4 * 1024**3:
+    print("CẢNH BÁO: 2 cặp best.pt + last.pt có thể cần khoảng 3-4 GB.")
+"""),
+        markdown("## 5. Smoke test"),
+        code("""from tqdm.auto import tqdm
+
+with tqdm(total=1, desc="Smoke test", unit="bước") as progress:
+    progress.set_postfix_str("Trạng thái: đang kiểm tra source")
+    marker_dir = RESULTS_ROOT / "_team_checks"
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker = marker_dir / f"member_{MEMBER_ID}_{SOURCE_SHA256}.smoke_passed"
+    if marker.exists():
+        print("Smoke test đã PASS với source này, bỏ qua.")
+    else:
+        subprocess.run([sys.executable, "-m", "scripts.smoke_test", "--quick"], cwd=PROJECT, check=True)
+        marker.write_text("PASS\\n", encoding="utf-8")
+    progress.update(1)
+    progress.set_postfix_str("Trạng thái: PASS", refresh=True)
+print("Smoke test: PASS")
+"""),
+        markdown("""## 6. Train và tự động resume
+
+Thanh ngoài theo dõi 2 model được phân công; chương trình train có thanh tiến trình theo batch và epoch. Job đã có `run_summary.json` hợp lệ sẽ được bỏ qua; job có `last.pt` sẽ tự thêm `--resume`.
+"""),
+        code("""from tqdm.auto import tqdm
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+def run_with_live_output(command, output_dir, queue):
+    import codecs
+    import queue as queue_module
+    import threading
+    import time
+
+    messages = queue_module.Queue()
+    environment = os.environ.copy()
+    environment["PYTHONUNBUFFERED"] = "1"
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command, cwd=PROJECT, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
 
-    cells.append(
-        markdown(
-            "## 0. Chuẩn bị thư mục Drive dùng chung\n"
-            "\n"
-            "Cả bốn tài khoản cần có quyền chỉnh sửa một thư mục Drive dùng chung. "
-            "Mỗi người thêm shortcut của thư mục đó vào `MyDrive` với tên "
-            "`LDTF_4_MEMBERS`.\n"
-            "\n"
-            "Chỉ cần tải hai file train/validation lên Drive theo cấu trúc:\n"
-            "\n"
-            "```text\n"
-            "LDTF_4_MEMBERS/\n"
-            "  data/processed/\n"
-            "    research_train.parquet\n"
-            "    research_validation.parquet\n"
-            "```\n"
-            "\n"
-            "Không đặt file test vào notebook làm việc nhóm. Test tiếp tục được khóa "
-            "cho lần đánh giá cuối cùng riêng biệt.\n"
-        )
-    )
+    def read_output():
+        try:
+            while True:
+                chunk = process.stdout.read1(4096)
+                if not chunk:
+                    break
+                messages.put(chunk)
+        except Exception as error:
+            messages.put(error)
+        finally:
+            messages.put(None)
 
-    cells.append(markdown("## 1. Mỗi thành viên chỉ sửa ô này"))
-    cells.append(
-        code(
-            "MEMBER_ID = 1  # Chọn đúng 1, 2, 3 hoặc 4\n"
-            "\n"
-            "SHARED_DRIVE_ROOT = '/content/drive/MyDrive/LDTF_4_MEMBERS'\n"
-            "REPO_URL = 'https://github.com/thanh1912-ut/LDTF_bert.git'\n"
-            "REPO_BRANCH = 'data/chi-bao-merge-datasets'\n"
-            "PROJECT_DIR = '/content/LDTF_bert'\n"
-            "\n"
-            "assert MEMBER_ID in (1, 2, 3, 4), 'MEMBER_ID phải là 1, 2, 3 hoặc 4'\n"
-            "print('Đã chọn MEMBER_ID =', MEMBER_ID)\n"
-        )
-    )
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    log_path = output_dir / "console.log"
+    print(f"PID: {process.pid} | Log trực tiếp: {log_path}", flush=True)
+    try:
+        with log_path.open("ab") as log:
+            while True:
+                try:
+                    chunk = messages.get(timeout=2)
+                except queue_module.Empty:
+                    elapsed = int(time.monotonic() - started)
+                    queue.set_postfix_str(
+                        f"{output_dir.name} | {elapsed}s | đang chờ log tiếp theo"
+                    )
+                    queue.refresh()
+                    continue
+                if chunk is None:
+                    break
+                if isinstance(chunk, Exception):
+                    raise chunk
+                log.write(chunk)
+                log.flush()
+                sys.stdout.write(decoder.decode(chunk))
+                sys.stdout.flush()
+            sys.stdout.write(decoder.decode(b"", final=True))
+            sys.stdout.flush()
+        return_code = process.wait()
+        if return_code:
+            raise subprocess.CalledProcessError(return_code, command)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        reader.join(timeout=5)
+        process.stdout.close()
 
-    cells.append(markdown("## 2. Mount Drive và lấy source code"))
-    cells.append(
-        code(
-            "from google.colab import drive\n"
-            "drive.mount('/content/drive')\n"
-            "\n"
-            "import os\n"
-            "import subprocess\n"
-            "import sys\n"
-            "from pathlib import Path\n"
-            "\n"
-            "SHARED_ROOT = Path(SHARED_DRIVE_ROOT)\n"
-            "PROJECT = Path(PROJECT_DIR)\n"
-            "assert SHARED_ROOT.is_dir(), (\n"
-            "    f'Không thấy {SHARED_ROOT}. Hãy thêm shortcut thư mục dùng chung vào MyDrive.'\n"
-            ")\n"
-            "\n"
-            "if not PROJECT.exists():\n"
-            "    subprocess.run(\n"
-            "        ['git', 'clone', '--branch', REPO_BRANCH, '--single-branch', REPO_URL, str(PROJECT)],\n"
-            "        check=True,\n"
-            "    )\n"
-            "else:\n"
-            "    assert (PROJECT / '.git').is_dir(), f'{PROJECT} tồn tại nhưng không phải Git repo'\n"
-            "    subprocess.run(['git', '-C', str(PROJECT), 'fetch', 'origin', REPO_BRANCH], check=True)\n"
-            "    subprocess.run(['git', '-C', str(PROJECT), 'checkout', REPO_BRANCH], check=True)\n"
-            "    subprocess.run(['git', '-C', str(PROJECT), 'pull', '--ff-only'], check=True)\n"
-            "\n"
-            "os.chdir(PROJECT)\n"
-            "sys.path.insert(0, str(PROJECT))\n"
-            "GIT_COMMIT = subprocess.check_output(\n"
-            "    ['git', 'rev-parse', 'HEAD'], cwd=PROJECT, text=True\n"
-            ").strip()\n"
-            "print('Project:', PROJECT)\n"
-            "print('Branch :', REPO_BRANCH)\n"
-            "print('Commit :', GIT_COMMIT)\n"
-        )
-    )
+def write_json(path, payload):
+    path = Path(path)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
-    cells.append(markdown("## 3. Cài thư viện và đọc config chung"))
-    cells.append(
-        code(
-            "subprocess.run(\n"
-            "    [sys.executable, '-m', 'pip', 'install', '-q', '-r', str(PROJECT / 'requirements.txt')],\n"
-            "    check=True,\n"
-            ")\n"
-            "\n"
-            "import hashlib\n"
-            "import json\n"
-            "\n"
-            "CONFIG_PATH = PROJECT / 'configs' / 'colab_4_members.json'\n"
-            "TEAM_CONFIG = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))\n"
-            "CONFIG_SHA256 = hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest()\n"
-            "MEMBER = TEAM_CONFIG['members'][str(MEMBER_ID)]\n"
-            "RESULTS_ROOT = SHARED_ROOT / TEAM_CONFIG['storage']['results_subdir']\n"
-            "ANALYSIS_ROOT = SHARED_ROOT / TEAM_CONFIG['storage']['analysis_subdir']\n"
-            "RESULTS_ROOT.mkdir(parents=True, exist_ok=True)\n"
-            "ANALYSIS_ROOT.mkdir(parents=True, exist_ok=True)\n"
-            "\n"
-            "print('Vai trò    :', MEMBER['role'])\n"
-            "print('Phân công  :', MEMBER['label'])\n"
-            "print('Config hash:', CONFIG_SHA256)\n"
-            "print('Kết quả tại:', RESULTS_ROOT)\n"
-        )
-    )
+protocol = TEAM_CONFIG["protocol"]
+assert protocol["delete_last_checkpoint_after_success"] is False
+seed = int(MEMBER["seed"])
+jobs = list(MEMBER["assigned_runs"])
+assert len(jobs) == 2 and set(jobs) <= set(protocol["runs"])
+with tqdm(total=len(jobs), desc=f"Member {MEMBER_ID} - seed {seed}", unit="model") as queue:
+    for run_name in jobs:
+        run_label = f"{run_name}_seed{seed}"
+        queue.set_postfix_str(f"Trạng thái: đang kiểm tra {run_label}")
+        output_dir = RESULTS_ROOT / run_label
+        output_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = output_dir / "run_summary.json"
+        last_path = output_dir / "last.pt"
+        metadata_path = output_dir / "team_job_metadata.json"
+        previous = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            signature = summary.get("data_signature", {})
+            assert summary.get("base_run") == run_name and summary.get("seed") == seed
+            assert signature.get("train_sha256") == dataset_cfg["sha256"][dataset_cfg["train_file"]]
+            assert signature.get("validation_sha256") == dataset_cfg["sha256"][dataset_cfg["validation_file"]]
+            assert previous.get("source_archive_sha256") == SOURCE_SHA256
+            assert previous.get("config_sha256") == CONFIG_SHA256
+            previous.update(status="complete", run_summary_sha256=sha256_file(summary_path))
+            write_json(metadata_path, previous)
+            assert last_path.exists(), f"Thiếu last.pt cần giữ lại: {run_label}"
+            queue.set_postfix_str(f"Trạng thái: đã có {run_label}")
+            queue.update(1)
+            continue
+        resume = last_path.exists()
+        if resume:
+            assert previous, "Có last.pt nhưng thiếu team_job_metadata.json"
+            assert previous.get("source_archive_sha256") == SOURCE_SHA256
+            assert previous.get("config_sha256") == CONFIG_SHA256
+            assert previous.get("member_id") == MEMBER_ID
+            print(f"\\nTiếp tục {run_label} từ epoch hoàn tất gần nhất.")
+            queue.set_postfix_str(f"Trạng thái: đang resume {run_label}")
+        else:
+            leftovers = [n for n in ("best.pt", "train_log.jsonl", "val_metrics.json") if (output_dir / n).exists()]
+            if leftovers:
+                raise RuntimeError(f"{run_label} có file dở nhưng thiếu last.pt: {leftovers}")
+            queue.set_postfix_str(f"Trạng thái: đang train mới {run_label}")
+        command = [sys.executable, "-u", "-m", "experiments.run_experiment", "--run", run_name, "--seed", str(seed), "--epochs", str(protocol["epochs"]), "--batch-size", str(protocol["batch_size"]), "--eval-batch-size", str(protocol["eval_batch_size"]), "--grad-accum-steps", str(protocol["grad_accum_steps"]), "--num-workers", str(protocol["num_workers"]), "--pad-to-multiple-of", str(protocol["pad_to_multiple_of"]), "--output-dir", str(output_dir)]
+        if resume:
+            command.append("--resume")
+        metadata = {"schema_version": 2, "experiment_name": TEAM_CONFIG["experiment_name"], "member_id": MEMBER_ID, "role": "trainer", "run": run_name, "seed": seed, "status": "running", "resumed": resume, "resume_count": int(previous.get("resume_count", 0)) + int(resume), "started_at_utc": previous.get("started_at_utc", utc_now()), "updated_at_utc": utc_now(), "source_archive_sha256": SOURCE_SHA256, "config_sha256": CONFIG_SHA256, "command": command, "checkpoint_policy": protocol["checkpoint_policy"]}
+        write_json(metadata_path, metadata)
+        print(f"\\nBắt đầu {run_label}; đang nạp model và chuẩn bị DataLoader...", flush=True)
+        try:
+            run_with_live_output(command, output_dir, queue)
+            assert summary_path.exists() and last_path.exists() and (output_dir / "best.pt").exists()
+            metadata.update(status="complete", completed_at_utc=utc_now(), run_summary_sha256=sha256_file(summary_path))
+            write_json(metadata_path, metadata)
+        except BaseException as error:
+            metadata.update(status="interrupted_or_failed", updated_at_utc=utc_now(), error=repr(error))
+            write_json(metadata_path, metadata)
+            raise
+        queue.update(1)
+    queue.set_postfix_str(f"Trạng thái: hoàn tất {len(jobs)}/{len(jobs)}", refresh=True)
+print("Đã hoàn thành hàng đợi. last.pt và best.pt đều được giữ trên Drive.")
+"""),
+        markdown("## 7. Tạo gói kết quả gửi Member 4"),
+        code("""from tqdm.auto import tqdm
 
-    cells.append(markdown("## 4. Kiểm tra GPU và dữ liệu cho Member 1-3"))
-    cells.append(
-        code(
-            "import shutil\n"
-            "\n"
-            "def sha256_file(path, chunk_size=1024 * 1024):\n"
-            "    digest = hashlib.sha256()\n"
-            "    with Path(path).open('rb') as handle:\n"
-            "        for chunk in iter(lambda: handle.read(chunk_size), b''):\n"
-            "            digest.update(chunk)\n"
-            "    return digest.hexdigest()\n"
-            "\n"
-            "if MEMBER['role'] == 'trainer':\n"
-            "    import torch\n"
-            "    assert torch.cuda.is_available(), 'Chưa bật GPU trong Colab Runtime'\n"
-            "    gpu_name = torch.cuda.get_device_name(0)\n"
-            "    assert 'T4' in gpu_name.upper(), f'Config nhóm yêu cầu T4, hiện tại là {gpu_name}'\n"
-            "    print('GPU:', gpu_name)\n"
-            "\n"
-            "    dataset_cfg = TEAM_CONFIG['dataset']\n"
-            "    drive_data = SHARED_ROOT / dataset_cfg['drive_processed_subdir']\n"
-            "    local_root = Path(dataset_cfg['local_data_root'])\n"
-            "    local_processed = local_root / 'processed'\n"
-            "    local_processed.mkdir(parents=True, exist_ok=True)\n"
-            "\n"
-            "    for filename in (dataset_cfg['train_file'], dataset_cfg['validation_file']):\n"
-            "        source = drive_data / filename\n"
-            "        destination = local_processed / filename\n"
-            "        assert source.is_file(), f'Thiếu dữ liệu trên Drive: {source}'\n"
-            "        expected_hash = dataset_cfg['sha256'][filename]\n"
-            "        source_hash = sha256_file(source)\n"
-            "        assert source_hash == expected_hash, f'Checksum sai: {source}'\n"
-            "        if not destination.exists() or sha256_file(destination) != expected_hash:\n"
-            "            print('Đang copy vào ổ cục bộ:', filename)\n"
-            "            shutil.copy2(source, destination)\n"
-            "        assert sha256_file(destination) == expected_hash\n"
-            "\n"
-            "    os.environ['LDTF_DATA_DIR'] = str(local_root)\n"
-            "\n"
-            "    import pandas as pd\n"
-            "    checks = (\n"
-            "        ('train', local_processed / dataset_cfg['train_file']),\n"
-            "        ('validation', local_processed / dataset_cfg['validation_file']),\n"
-            "    )\n"
-            "    for split, path in checks:\n"
-            "        labels = pd.read_parquet(path, columns=['label'])['label']\n"
-            "        counts = labels.value_counts().sort_index().tolist()\n"
-            "        assert len(labels) == dataset_cfg['expected_rows'][split]\n"
-            "        assert counts == dataset_cfg['expected_label_counts'][split]\n"
-            "        print(f'{split:<10}: {len(labels):,} dòng, nhãn {counts}')\n"
-            "\n"
-            "    assert not (local_processed / dataset_cfg['sealed_test_file']).exists(), (\n"
-            "        'Notebook nhóm không được copy tập test vào vùng train'\n"
-            "    )\n"
-            "else:\n"
-            "    print('Member 4 không cần GPU hoặc dữ liệu gốc để tổng hợp validation.')\n"
-        )
-    )
+bundle = EXPORT_ROOT / f"member_{MEMBER_ID}_seed{seed}_summaries.zip"
+included = []
+with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with tqdm(jobs, desc="Đóng gói kết quả", unit="model") as progress:
+      for run_name in progress:
+        progress.set_postfix_str(f"Trạng thái: đang đóng gói {run_name}")
+        run_label = f"{run_name}_seed{seed}"
+        run_dir = RESULTS_ROOT / run_label
+        if not (run_dir / "run_summary.json").exists():
+            continue
+        for filename in ("run_summary.json", "team_job_metadata.json", "val_metrics.json", "train_log.jsonl"):
+            source = run_dir / filename
+            if source.exists():
+                archive.write(source, arcname=f"{run_label}/{filename}")
+        included.append(run_label)
+      progress.set_postfix_str("Trạng thái: hoàn tất", refresh=True)
+assert len(included) == len(jobs), f"Mới hoàn thành {len(included)}/{len(jobs)} model"
+print("Đã tạo:", bundle)
+print("Gửi file ZIP này cho Member 4. Checkpoint vẫn nằm trên Drive của bạn.")
+"""),
+        markdown("## 8. Trạng thái cuối"),
+        code("""from tqdm.auto import tqdm
 
-    cells.append(markdown("## 5. Smoke test tự động cho Member 1-3"))
-    cells.append(
-        code(
-            "if MEMBER['role'] == 'trainer':\n"
-            "    marker_dir = RESULTS_ROOT / '_team_checks'\n"
-            "    marker_dir.mkdir(parents=True, exist_ok=True)\n"
-            "    smoke_marker = marker_dir / f'member_{MEMBER_ID}_{GIT_COMMIT}.smoke_passed'\n"
-            "    if smoke_marker.exists():\n"
-            "        print('Smoke test đã PASS cho member và commit này.')\n"
-            "    else:\n"
-            "        subprocess.run(\n"
-            "            [sys.executable, '-m', 'scripts.smoke_test', '--quick'],\n"
-            "            cwd=PROJECT,\n"
-            "            check=True,\n"
-            "        )\n"
-            "        smoke_marker.write_text('PASS\\n', encoding='utf-8')\n"
-            "        print('Smoke test: PASS')\n"
-            "else:\n"
-            "    print('Bỏ qua smoke test vì Member 4 chỉ phân tích kết quả.')\n"
-        )
-    )
-
-    cells.append(
-        markdown(
-            "## 6. Hàng đợi train cho Member 1-3\n"
-            "\n"
-            "Mỗi trainer chạy cùng sáu model với seed được giao. Nếu Colab ngắt, mở lại "
-            "notebook với cùng `MEMBER_ID` và chạy từ đầu; job chưa xong sẽ tự dùng "
-            "`last.pt` để resume, job hoàn tất sẽ được bỏ qua.\n"
-        )
-    )
-    cells.append(
-        code(
-            "from datetime import datetime, timezone\n"
-            "\n"
-            "def utc_now():\n"
-            "    return datetime.now(timezone.utc).isoformat()\n"
-            "\n"
-            "def write_json(path, payload):\n"
-            "    path = Path(path)\n"
-            "    path.parent.mkdir(parents=True, exist_ok=True)\n"
-            "    temporary = path.with_suffix(path.suffix + '.tmp')\n"
-            "    temporary.write_text(\n"
-            "        json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8'\n"
-            "    )\n"
-            "    temporary.replace(path)\n"
-            "\n"
-            "if MEMBER['role'] == 'trainer':\n"
-            "    protocol = TEAM_CONFIG['protocol']\n"
-            "    seed = int(MEMBER['seed'])\n"
-            "    jobs = list(protocol['runs'])\n"
-            "    print(f'Member {MEMBER_ID}: {len(jobs)} job, seed {seed}')\n"
-            "\n"
-            "    for position, run_name in enumerate(jobs, start=1):\n"
-            "        run_label = f'{run_name}_seed{seed}'\n"
-            "        output_dir = RESULTS_ROOT / run_label\n"
-            "        summary_path = output_dir / 'run_summary.json'\n"
-            "        last_path = output_dir / 'last.pt'\n"
-            "        metadata_path = output_dir / 'team_job_metadata.json'\n"
-            "\n"
-            "        print(f'\\n[{position}/{len(jobs)}] {run_label}')\n"
-            "        output_dir.mkdir(parents=True, exist_ok=True)\n"
-            "        resume = last_path.exists()\n"
-            "        previous_metadata = (\n"
-            "            json.loads(metadata_path.read_text(encoding='utf-8'))\n"
-            "            if metadata_path.exists() else {}\n"
-            "        )\n"
-            "\n"
-            "        if summary_path.exists():\n"
-            "            existing = json.loads(summary_path.read_text(encoding='utf-8'))\n"
-            "            signature = existing.get('data_signature', {})\n"
-            "            dataset_cfg = TEAM_CONFIG['dataset']\n"
-            "            assert existing.get('base_run') == run_name\n"
-            "            assert existing.get('seed') == seed\n"
-            "            assert existing.get('train_rows') == dataset_cfg['expected_rows']['train']\n"
-            "            assert signature.get('train_sha256') == dataset_cfg['sha256'][dataset_cfg['train_file']]\n"
-            "            assert signature.get('validation_sha256') == dataset_cfg['sha256'][dataset_cfg['validation_file']]\n"
-            "            assert previous_metadata.get('git_commit') == GIT_COMMIT, (\n"
-            "                'Job hoàn thành bằng commit khác với notebook hiện tại'\n"
-            "            )\n"
-            "            assert previous_metadata.get('config_sha256') == CONFIG_SHA256, (\n"
-            "                'Job hoàn thành bằng config khác với notebook hiện tại'\n"
-            "            )\n"
-            "            previous_metadata['status'] = 'complete'\n"
-            "            previous_metadata['run_summary_sha256'] = sha256_file(summary_path)\n"
-            "            write_json(metadata_path, previous_metadata)\n"
-            "            if protocol['delete_last_checkpoint_after_success'] and last_path.exists():\n"
-            "                last_path.unlink()\n"
-            "            print('Đã hoàn thành và đúng protocol, bỏ qua.')\n"
-            "            continue\n"
-            "\n"
-            "        if resume:\n"
-            "            assert previous_metadata, 'Có last.pt nhưng thiếu team_job_metadata.json'\n"
-            "            assert previous_metadata.get('git_commit') == GIT_COMMIT, (\n"
-            "                'Không resume checkpoint bằng commit code khác'\n"
-            "            )\n"
-            "            assert previous_metadata.get('config_sha256') == CONFIG_SHA256, (\n"
-            "                'Không resume checkpoint bằng config khác'\n"
-            "            )\n"
-            "            assert previous_metadata.get('member_id') == MEMBER_ID\n"
-            "            assert previous_metadata.get('run') == run_name\n"
-            "            assert previous_metadata.get('seed') == seed\n"
-            "        unexpected = [\n"
-            "            name for name in ('best.pt', 'train_log.jsonl', 'val_metrics.json')\n"
-            "            if (output_dir / name).exists()\n"
-            "        ]\n"
-            "        if unexpected and not resume:\n"
-            "            raise RuntimeError(\n"
-            "                f'{run_label} có artifact dở nhưng thiếu last.pt: {unexpected}'\n"
-            "            )\n"
-            "\n"
-            "        command = [\n"
-            "            sys.executable, '-m', 'experiments.run_experiment',\n"
-            "            '--run', run_name,\n"
-            "            '--seed', str(seed),\n"
-            "            '--epochs', str(protocol['epochs']),\n"
-            "            '--batch-size', str(protocol['batch_size']),\n"
-            "            '--eval-batch-size', str(protocol['eval_batch_size']),\n"
-            "            '--grad-accum-steps', str(protocol['grad_accum_steps']),\n"
-            "            '--num-workers', str(protocol['num_workers']),\n"
-            "            '--pad-to-multiple-of', str(protocol['pad_to_multiple_of']),\n"
-            "            '--output-dir', str(output_dir),\n"
-            "        ]\n"
-            "        if resume:\n"
-            "            command.append('--resume')\n"
-            "\n"
-            "        metadata = {\n"
-            "            'schema_version': 1,\n"
-            "            'experiment_name': TEAM_CONFIG['experiment_name'],\n"
-            "            'member_id': MEMBER_ID,\n"
-            "            'role': MEMBER['role'],\n"
-            "            'run': run_name,\n"
-            "            'seed': seed,\n"
-            "            'status': 'running',\n"
-            "            'resumed': resume,\n"
-            "            'resume_count': int(previous_metadata.get('resume_count', 0)) + int(resume),\n"
-            "            'started_at_utc': previous_metadata.get('started_at_utc', utc_now()),\n"
-            "            'git_commit': GIT_COMMIT,\n"
-            "            'config_sha256': CONFIG_SHA256,\n"
-            "            'command': command,\n"
-            "        }\n"
-            "        write_json(metadata_path, metadata)\n"
-            "\n"
-            "        try:\n"
-            "            subprocess.run(command, cwd=PROJECT, env=os.environ.copy(), check=True)\n"
-            "            assert summary_path.exists(), f'Thiếu run_summary.json sau {run_label}'\n"
-            "            metadata['status'] = 'complete'\n"
-            "            metadata['completed_at_utc'] = utc_now()\n"
-            "            metadata['run_summary_sha256'] = sha256_file(summary_path)\n"
-            "            write_json(metadata_path, metadata)\n"
-            "            if protocol['delete_last_checkpoint_after_success'] and last_path.exists():\n"
-            "                size_gb = last_path.stat().st_size / (1024 ** 3)\n"
-            "                last_path.unlink()\n"
-            "                print(f'Đã xóa last.pt ({size_gb:.2f} GB) vì job đã hoàn thành.')\n"
-            "        except BaseException as error:\n"
-            "            metadata['status'] = 'interrupted_or_failed'\n"
-            "            metadata['updated_at_utc'] = utc_now()\n"
-            "            metadata['error'] = repr(error)\n"
-            "            write_json(metadata_path, metadata)\n"
-            "            raise\n"
-            "\n"
-            "    print('\\nToàn bộ hàng đợi của thành viên đã hoàn thành.')\n"
-            "else:\n"
-            "    print('Member 4 không chạy train. Chuyển tới phần tổng hợp bên dưới.')\n"
-        )
-    )
-
-    cells.append(markdown("## 7. Member 4 kiểm tra đủ 18 job và tính analytics"))
-    cells.append(
-        code(
-            "import pandas as pd\n"
-            "\n"
-            "if MEMBER['role'] == 'analyst':\n"
-            "    protocol = TEAM_CONFIG['protocol']\n"
-            "    trainer_members = [\n"
-            "        (int(member_id), details)\n"
-            "        for member_id, details in TEAM_CONFIG['members'].items()\n"
-            "        if details['role'] == 'trainer'\n"
-            "    ]\n"
-            "    expected_jobs = [\n"
-            "        (member_id, run_name, int(details['seed']))\n"
-            "        for member_id, details in trainer_members\n"
-            "        for run_name in protocol['runs']\n"
-            "    ]\n"
-            "\n"
-            "    status_rows = []\n"
-            "    result_rows = []\n"
-            "    violations = []\n"
-            "    commits = set()\n"
-            "    config_hashes = set()\n"
-            "    dataset_cfg = TEAM_CONFIG['dataset']\n"
-            "\n"
-            "    for member_id, run_name, seed in expected_jobs:\n"
-            "        run_label = f'{run_name}_seed{seed}'\n"
-            "        output_dir = RESULTS_ROOT / run_label\n"
-            "        summary_path = output_dir / 'run_summary.json'\n"
-            "        metadata_path = output_dir / 'team_job_metadata.json'\n"
-            "        status = 'complete' if summary_path.exists() else (\n"
-            "            'incomplete' if output_dir.exists() else 'missing'\n"
-            "        )\n"
-            "        status_rows.append({\n"
-            "            'member_id': member_id, 'run': run_name, 'seed': seed, 'status': status\n"
-            "        })\n"
-            "        if status != 'complete':\n"
-            "            continue\n"
-            "\n"
-            "        summary = json.loads(summary_path.read_text(encoding='utf-8'))\n"
-            "        metadata = (\n"
-            "            json.loads(metadata_path.read_text(encoding='utf-8'))\n"
-            "            if metadata_path.exists() else {}\n"
-            "        )\n"
-            "        runtime = summary.get('runtime', {})\n"
-            "        signature = summary.get('data_signature', {})\n"
-            "        checks = {\n"
-            "            'base_run': summary.get('base_run') == run_name,\n"
-            "            'seed': summary.get('seed') == seed,\n"
-            "            'full_data': not summary.get('is_debug_subset', True),\n"
-            "            'train_rows': summary.get('train_rows') == dataset_cfg['expected_rows']['train'],\n"
-            "            'train_hash': signature.get('train_sha256') == dataset_cfg['sha256'][dataset_cfg['train_file']],\n"
-            "            'validation_hash': signature.get('validation_sha256') == dataset_cfg['sha256'][dataset_cfg['validation_file']],\n"
-            "            'epochs': summary.get('epochs') == protocol['epochs'],\n"
-            "            'batch_size': runtime.get('global_batch_size') == protocol['batch_size'],\n"
-            "            'eval_batch_size': runtime.get('global_eval_batch_size') == protocol['eval_batch_size'],\n"
-            "            'world_size': runtime.get('world_size') == 1,\n"
-            "            'deterministic': runtime.get('deterministic') is True,\n"
-            "            'amp': runtime.get('amp') is True,\n"
-            "            't4_gpu': any(\n"
-            "                'T4' in str(device).upper() for device in runtime.get('devices', [])\n"
-            "            ),\n"
-            "            'padding': runtime.get('pad_to_multiple_of') == protocol['pad_to_multiple_of'],\n"
-            "            'metadata_complete': metadata.get('status') == 'complete',\n"
-            "            'assigned_member': metadata.get('member_id') == member_id,\n"
-            "            'config_hash': metadata.get('config_sha256') == CONFIG_SHA256,\n"
-            "            'git_commit_present': bool(metadata.get('git_commit')),\n"
-            "        }\n"
-            "        failed_checks = [name for name, passed in checks.items() if not passed]\n"
-            "        if failed_checks:\n"
-            "            violations.append({'job': run_label, 'failed_checks': failed_checks})\n"
-            "        if metadata.get('git_commit'):\n"
-            "            commits.add(metadata['git_commit'])\n"
-            "        if metadata.get('config_sha256'):\n"
-            "            config_hashes.add(metadata['config_sha256'])\n"
-            "\n"
-            "        result_rows.append({\n"
-            "            'member_id': member_id,\n"
-            "            'run': run_name,\n"
-            "            'seed': seed,\n"
-            "            'best_epoch': summary['best_epoch'],\n"
-            "            'val_f1_macro': summary['best_val_f1_macro'],\n"
-            "            'val_accuracy': summary['best_val_accuracy'],\n"
-            "            'val_loss': summary['best_val_loss'],\n"
-            "            'train_hours': summary['total_train_seconds'] / 3600,\n"
-            "            'peak_vram_gb': summary['peak_vram_gb'],\n"
-            "            'git_commit': metadata.get('git_commit', 'MISSING'),\n"
-            "            'protocol_ok': not failed_checks,\n"
-            "        })\n"
-            "\n"
-            "    if len(commits) > 1:\n"
-            "        violations.append({\n"
-            "            'job': '_team', 'failed_checks': ['multiple_git_commits']\n"
-            "        })\n"
-            "    if config_hashes and config_hashes != {CONFIG_SHA256}:\n"
-            "        violations.append({\n"
-            "            'job': '_team', 'failed_checks': ['mixed_or_outdated_config']\n"
-            "        })\n"
-            "\n"
-            "    status_df = pd.DataFrame(status_rows)\n"
-            "    raw_df = pd.DataFrame(result_rows)\n"
-            "    display(status_df)\n"
-            "    print('Hoàn thành:', int((status_df['status'] == 'complete').sum()), '/', len(status_df))\n"
-            "    print('Số commit code:', len(commits), sorted(commits))\n"
-            "    print('Số config hash:', len(config_hashes), sorted(config_hashes))\n"
-            "    print('Vi phạm protocol:', len(violations))\n"
-            "    if violations:\n"
-            "        display(pd.DataFrame(violations))\n"
-            "else:\n"
-            "    print('Phần này dành cho Member 4.')\n"
-        )
-    )
-
-    cells.append(markdown("## 8. Member 4 xuất bảng, biểu đồ và báo cáo"))
-    cells.append(
-        code(
-            "if MEMBER['role'] == 'analyst':\n"
-            "    ANALYSIS_ROOT.mkdir(parents=True, exist_ok=True)\n"
-            "    status_df.to_csv(ANALYSIS_ROOT / 'job_status.csv', index=False)\n"
-            "    raw_df.to_csv(ANALYSIS_ROOT / 'validation_by_seed.csv', index=False)\n"
-            "\n"
-            "    if raw_df.empty:\n"
-            "        print('Chưa có job hoàn thành để phân tích.')\n"
-            "    else:\n"
-            "        import matplotlib.pyplot as plt\n"
-            "        import numpy as np\n"
-            "\n"
-            "        aggregate_df = (\n"
-            "            raw_df.groupby('run', as_index=False)\n"
-            "            .agg(\n"
-            "                completed_seeds=('seed', 'count'),\n"
-            "                val_f1_mean=('val_f1_macro', 'mean'),\n"
-            "                val_f1_std=('val_f1_macro', 'std'),\n"
-            "                val_accuracy_mean=('val_accuracy', 'mean'),\n"
-            "                val_accuracy_std=('val_accuracy', 'std'),\n"
-            "                train_hours_mean=('train_hours', 'mean'),\n"
-            "                peak_vram_gb_max=('peak_vram_gb', 'max'),\n"
-            "            )\n"
-            "            .sort_values('val_f1_mean', ascending=False)\n"
-            "            .reset_index(drop=True)\n"
-            "        )\n"
-            "        aggregate_df['rank'] = np.arange(1, len(aggregate_df) + 1)\n"
-            "\n"
-            "        baseline = 'B2_bert_finetuned_cls'\n"
-            "        pivot = raw_df.pivot(index='seed', columns='run', values='val_f1_macro')\n"
-            "        delta_rows = []\n"
-            "        if baseline in pivot.columns:\n"
-            "            for run_name in protocol['runs']:\n"
-            "                if run_name == baseline or run_name not in pivot.columns:\n"
-            "                    continue\n"
-            "                paired = (pivot[run_name] - pivot[baseline]).dropna()\n"
-            "                for seed, delta in paired.items():\n"
-            "                    delta_rows.append({\n"
-            "                        'run': run_name, 'seed': int(seed),\n"
-            "                        'delta_f1_vs_B2': float(delta),\n"
-            "                    })\n"
-            "        delta_df = pd.DataFrame(delta_rows)\n"
-            "        if not delta_df.empty:\n"
-            "            delta_summary_df = (\n"
-            "                delta_df.groupby('run', as_index=False)\n"
-            "                .agg(\n"
-            "                    paired_seeds=('seed', 'count'),\n"
-            "                    delta_f1_mean=('delta_f1_vs_B2', 'mean'),\n"
-            "                    delta_f1_std=('delta_f1_vs_B2', 'std'),\n"
-            "                )\n"
-            "                .sort_values('delta_f1_mean', ascending=False)\n"
-            "            )\n"
-            "        else:\n"
-            "            delta_summary_df = pd.DataFrame(\n"
-            "                columns=['run', 'paired_seeds', 'delta_f1_mean', 'delta_f1_std']\n"
-            "            )\n"
-            "\n"
-            "        aggregate_df.to_csv(ANALYSIS_ROOT / 'validation_aggregate.csv', index=False)\n"
-            "        delta_df.to_csv(ANALYSIS_ROOT / 'paired_deltas_vs_B2.csv', index=False)\n"
-            "        delta_summary_df.to_csv(ANALYSIS_ROOT / 'paired_delta_summary.csv', index=False)\n"
-            "        write_json(ANALYSIS_ROOT / 'protocol_violations.json', violations)\n"
-            "\n"
-            "        plot_df = aggregate_df.sort_values('val_f1_mean')\n"
-            "        figure, axis = plt.subplots(figsize=(9, 4.8))\n"
-            "        errors = plot_df['val_f1_std'].fillna(0)\n"
-            "        axis.barh(plot_df['run'], plot_df['val_f1_mean'], xerr=errors, color='#287271')\n"
-            "        axis.set_xlabel('Validation macro F1 trung bình')\n"
-            "        axis.set_title('So sánh model qua ba seed')\n"
-            "        axis.grid(axis='x', alpha=0.25)\n"
-            "        figure.tight_layout()\n"
-            "        figure.savefig(ANALYSIS_ROOT / 'validation_f1_mean_std.png', dpi=180)\n"
-            "        plt.show()\n"
-            "\n"
-            "        def markdown_table(frame):\n"
-            "            view = frame.copy()\n"
-            "            for column in view.select_dtypes(include='number').columns:\n"
-            "                view[column] = view[column].map(\n"
-            "                    lambda value: '' if pd.isna(value) else f'{value:.6f}'\n"
-            "                )\n"
-            "            headers = [str(column) for column in view.columns]\n"
-            "            lines = ['| ' + ' | '.join(headers) + ' |']\n"
-            "            lines.append('| ' + ' | '.join(['---'] * len(headers)) + ' |')\n"
-            "            for row in view.astype(str).itertuples(index=False, name=None):\n"
-            "                lines.append('| ' + ' | '.join(row) + ' |')\n"
-            "            return '\\n'.join(lines)\n"
-            "\n"
-            "        complete_count = int((status_df['status'] == 'complete').sum())\n"
-            "        experiment_name = TEAM_CONFIG['experiment_name']\n"
-            "        report = [\n"
-            "            '# Báo cáo validation ba seed',\n"
-            "            '',\n"
-            "            f'- Thí nghiệm: `{TEAM_CONFIG[\"experiment_name\"]}`',\n"
-            "            f'- Job hoàn thành: **{complete_count}/{len(status_df)}**',\n"
-            "            f'- Số commit code xuất hiện: **{len(commits)}**',\n"
-            "            f'- Số vi phạm protocol: **{len(violations)}**',\n"
-            "            '- Tập test: **chưa sử dụng**',\n"
-            "            '',\n"
-            "            '## Kết quả tổng hợp',\n"
-            "            '',\n"
-            "            markdown_table(aggregate_df),\n"
-            "            '',\n"
-            "            '## Chênh lệch Macro F1 so với B2',\n"
-            "            '',\n"
-            "            markdown_table(delta_summary_df),\n"
-            "            '',\n"
-            "            'Kết quả trên mới là validation. Không dùng bảng này như kết quả test cuối cùng.',\n"
-            "        ]\n"
-            "        (ANALYSIS_ROOT / 'ANALYSIS_REPORT.md').write_text(\n"
-            "            '\\n'.join(report) + '\\n', encoding='utf-8'\n"
-            "        )\n"
-            "\n"
-            "        display(aggregate_df)\n"
-            "        display(delta_summary_df)\n"
-            "        print('Đã xuất báo cáo tại:', ANALYSIS_ROOT)\n"
-            "else:\n"
-            "    print('Phần xuất analytics dành cho Member 4.')\n"
-        )
-    )
-
-    cells.append(
-        markdown(
-            "## 9. Sau khi Member 4 tổng hợp\n"
-            "\n"
-            "Chỉ coi giai đoạn này hoàn thành khi đủ `18/18` job, chỉ có một commit code, "
-            "một config hash và không có vi phạm protocol. Nhóm chọn kiến trúc bằng "
-            "validation, chốt mọi quyết định, rồi giao một người duy nhất thực hiện quy "
-            "trình final test được mô tả trong `HUONG_DAN_TRAIN_DATA_MOI.md`.\n"
-            "\n"
-            "Member 4 **không chọn seed tốt nhất**. Cần báo cáo trung bình và độ lệch "
-            "chuẩn của cả ba seed.\n"
-        )
-    )
-
-    return cells
+rows = []
+with tqdm(jobs, desc="Kiểm tra artifact", unit="model") as progress:
+    for run_name in progress:
+        progress.set_postfix_str(f"Trạng thái: đang kiểm tra {run_name}")
+        run_dir = RESULTS_ROOT / f"{run_name}_seed{seed}"
+        rows.append({"model": run_name, "summary": (run_dir / "run_summary.json").exists(), "best_checkpoint": (run_dir / "best.pt").exists(), "latest_checkpoint": (run_dir / "last.pt").exists(), "training_log": (run_dir / "train_log.jsonl").exists()})
+    progress.set_postfix_str("Trạng thái: hoàn tất", refresh=True)
+display(pd.DataFrame(rows))
+assert all(all(row[key] for key in ("summary", "best_checkpoint", "latest_checkpoint", "training_log")) for row in rows)
+print("HOÀN TẤT: đủ log, best.pt, last.pt và summary cho 2 model được phân công.")
+"""),
+    ]
 
 
 def build_notebook() -> dict:
-    return {
-        "cells": build_cells(),
-        "metadata": {
-            "accelerator": "GPU",
-            "colab": {"provenance": [], "toc_visible": True},
-            "kernelspec": {"display_name": "Python 3", "name": "python3"},
-            "language_info": {"name": "python"},
-        },
-        "nbformat": 4,
-        "nbformat_minor": 0,
-    }
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate the 4-member Colab notebook.")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    return parser.parse_args(argv)
+    return {"cells": build_cells(), "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "toc_visible": True}, "kernelspec": {"display_name": "Python 3", "name": "python3"}, "language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 0}
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    args = parser.parse_args(argv)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     notebook = build_notebook()
-    args.output.write_text(
-        json.dumps(notebook, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
-    print(f"[colab-team] wrote {args.output} ({len(notebook['cells'])} cells)")
+    args.output.write_text(json.dumps(notebook, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"[colab-trainers] wrote {args.output} ({len(notebook['cells'])} cells)")
     return 0
 
 

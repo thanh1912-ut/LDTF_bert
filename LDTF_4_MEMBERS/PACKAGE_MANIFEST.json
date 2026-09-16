@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "folder_name_on_drive": "LDTF_4_MEMBERS",
+  "notebooks": {
+    "train_members_1_2_3": "colab_4_members_multisource.ipynb",
+    "analysis_member_4": "colab_member_4_analysis.ipynb"
+  },
+  "source": {
+    "filename": "LDTF_bert_source.zip",
+    "sha256": "8c37356947d9819945765aacd25538bdd857200145441c6e8e1cccb3da84abf8",
+    "files": 34,
+    "bytes": 81663
+  },
+  "data": {
+    "research_train.parquet": {
+      "sha256": "de4bddafcc5449b16a1c63b4dd89488c2ef15906194984b51812070e540d0601",
+      "bytes": 84345447
+    },
+    "research_validation.parquet": {
+      "sha256": "78d96c6a809123ce4b0fed35d153939f3fc068dd0dcf139221faec3caec63fca",
+      "bytes": 8785120
+    }
+  },
+  "sealed_test_included": false
+}

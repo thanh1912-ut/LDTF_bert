@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 
 import torch
+from tqdm.auto import tqdm
 
 from src import config
 from src.dataset import build_dataloaders, data_signature
@@ -183,7 +184,27 @@ def main(argv: list[str] | None = None) -> int:
                 "or --force to archive them and start fresh."
             )
 
+        setup_progress = (
+            tqdm(
+                total=5,
+                desc=f"Khởi tạo {run_id}",
+                unit="bước",
+                dynamic_ncols=True,
+            )
+            if context.is_main
+            else None
+        )
+
+        def setup_status(message: str, *, advance: bool = False) -> None:
+            if setup_progress is None:
+                return
+            if advance:
+                setup_progress.update(1)
+            setup_progress.set_postfix_str(f"Trạng thái: {message}", refresh=True)
+
+        setup_status("đang tải tokenizer BERT")
         tokenizer = LdtfBert.build_tokenizer(config.MODEL_NAME)
+        setup_status("đang tạo DataLoader", advance=True)
         loaders = build_dataloaders(
             tokenizer,
             batch_size=args.batch_size,
@@ -195,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
             world_size=context.world_size,
             pad_to_multiple_of=args.pad_to_multiple_of,
         )
+        setup_status("đang kiểm tra checksum dữ liệu", advance=True)
         if context.is_main and args.limit_train_rows is not None:
             print(
                 f"[{run_id}] WARNING: training on a {loaders['train_size']}-row debug "
@@ -232,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         }
 
+        setup_status("đang tải trọng số model BERT", advance=True)
         model = build_model(args.run, frozen_backbone=args.frozen_backbone)
         counts = model.count_parameters()
         if context.is_main:
@@ -268,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             architecture=model.architecture_config(),
         )
 
+        setup_status("đang kiểm tra optimizer", advance=True)
         coverage = optimizer_coverage_report(
             model, build_optimizer(model, train_config)
         )
@@ -275,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError(
                 f"Optimizer does not cover the trainable set: {coverage}"
             )
+        setup_status("hoàn tất, bắt đầu train", advance=True)
+        if setup_progress is not None:
+            setup_progress.close()
 
         result = train_model(
             model,

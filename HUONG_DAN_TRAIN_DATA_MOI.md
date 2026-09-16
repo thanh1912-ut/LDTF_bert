@@ -307,22 +307,51 @@ Ví dụ với A0, chạy lại lệnh train và thay đồng thời:
 Sau đó báo cáo trung bình và độ dao động của validation/test thay vì chỉ chọn
 seed có kết quả cao nhất.
 
+Đây là quy trình đầy đủ khi có đủ thời gian tính toán. Đợt Colab hiện tại ưu
+tiên hoàn thành sáu kiến trúc trong thời gian ngắn hơn, nên cả ba member dùng
+chung seed 42 và mỗi người chạy hai model. Vì vậy báo cáo hiện tại dùng để so
+sánh kiến trúc trên cùng seed, chưa đo được độ ổn định qua nhiều seed.
+
 ### Phân công nhóm bốn thành viên trên Google Colab
 
-Dự án có sẵn một notebook dùng chung tại
-`notebooks/colab_4_members_multisource.ipynb` và cấu hình tại
+Dự án có một notebook train tại
+`notebooks/colab_4_members_multisource.ipynb`, một notebook phân tích tại
+`notebooks/colab_member_4_analysis.ipynb` và cấu hình chung tại
 `configs/colab_4_members.json`:
 
 | Thành viên | Vai trò |
 | --- | --- |
-| Member 1 | Train `B2, A0, A1, A3, A4, A11` với seed 42 |
-| Member 2 | Train cùng sáu model với seed 1337 |
-| Member 3 | Train cùng sáu model với seed 2024 |
-| Member 4 | Kiểm tra đủ 18 job và tổng hợp validation |
+| Member 1 | Train `B2, A0` với seed 42 |
+| Member 2 | Train `A1, A3` với seed 42 |
+| Member 3 | Train `A4, A11` với seed 42 |
+| Member 4 | Kiểm tra đủ 6 model và tổng hợp validation |
 
-Mỗi người mở cùng notebook và chỉ thay `MEMBER_ID`. Ba trainer bật GPU T4;
-Member 4 có thể dùng CPU. Notebook tự resume job bị ngắt và không sử dụng tập
-test.
+Member 1-3 mở notebook train, chỉ thay `MEMBER_ID` thành 1, 2 hoặc 3 và bật GPU
+T4. Member 4 mở notebook phân tích riêng và có thể dùng CPU. Cả hai notebook
+đều không sử dụng tập test.
+
+Mỗi thành viên sử dụng Google Drive riêng. Khi chạy notebook, code tự tạo
+`MyDrive/LDTF_4_MEMBERS` cùng các thư mục `source`, `data`, `results`, `exports`,
+`incoming` và `analysis`. Folder bàn giao đã chứa sẵn `LDTF_bert_source.zip`,
+train và validation. Mỗi người upload nguyên folder `LDTF_4_MEMBERS` vào
+`MyDrive`. Member 1-3 mở notebook train, sửa `MEMBER_ID`, bật GPU T4 và bấm
+**Run all**. Member 4 mở `colab_member_4_analysis.ipynb` rồi bấm **Run all**.
+Không cần clone hoặc pull source từ GitHub.
+
+Cả bốn người phải bắt đầu từ cùng folder bàn giao để checksum source và dữ liệu
+giống nhau. Notebook train sẽ dừng với đường dẫn file còn thiếu để tránh vô tình
+dùng sai dữ liệu.
+
+Sau khi train, mỗi trainer chạy bước bàn giao để tạo một file ZIP summary nhỏ
+trong `exports/` rồi gửi cho Member 4. Member 4 tải ba file nhận được vào
+`incoming/`; notebook phân tích sẽ tự nhập, kiểm tra protocol và tổng hợp đủ 6
+kết quả. Checkpoint đầy đủ vẫn được giữ trên Drive cá nhân của từng trainer.
+
+Sau mỗi epoch hoàn tất, pipeline cập nhật `last.pt`, `train_log.jsonl` và
+`val_metrics.json` trực tiếp trên Drive. Khi phiên Colab bị ngắt, mở lại bằng
+cùng `MEMBER_ID` và Run all; pipeline tự thêm `--resume`. Nếu phiên bị ngắt giữa
+một epoch thì epoch đang dở chạy lại từ đầu, còn các epoch đã hoàn tất không bị
+mất. `best.pt` và `last.pt` đều được giữ sau khi train xong.
 
 ## 11. Các file kết quả được tạo ra
 

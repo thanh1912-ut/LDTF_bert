@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
-  "experiment_name": "multisource_v1_core_3seeds",
-  "description": "Ba thành viên train cùng nhóm model trên ba seed; thành viên 4 tổng hợp validation.",
+  "schema_version": 2,
+  "experiment_name": "multisource_v1_core_seed42_split3",
+  "description": "Ba thành viên cùng dùng seed 42, mỗi người train hai trong tổng số sáu model; thành viên 4 tổng hợp validation.",
   "dataset": {
     "version": "multisource-v1",
     "drive_processed_subdir": "data/processed",
@@ -42,23 +42,32 @@
     "deterministic": true,
     "selection_metric": "val_f1_macro",
     "run_smoke_test_once_per_member_and_commit": true,
-    "delete_last_checkpoint_after_success": true
+    "delete_last_checkpoint_after_success": false,
+    "checkpoint_policy": {
+      "resume_from": "last.pt",
+      "best_model": "best.pt",
+      "save_last_after_each_completed_epoch": true,
+      "keep_last_after_success": true
+    }
   },
   "members": {
     "1": {
       "role": "trainer",
       "seed": 42,
-      "label": "Trainer seed 42"
+      "label": "Trainer seed 42: B2 và A0",
+      "assigned_runs": ["B2_bert_finetuned_cls", "A0"]
     },
     "2": {
       "role": "trainer",
-      "seed": 1337,
-      "label": "Trainer seed 1337"
+      "seed": 42,
+      "label": "Trainer seed 42: A1 và A3",
+      "assigned_runs": ["A1", "A3"]
     },
     "3": {
       "role": "trainer",
-      "seed": 2024,
-      "label": "Trainer seed 2024"
+      "seed": 42,
+      "label": "Trainer seed 42: A4 và A11",
+      "assigned_runs": ["A4", "A11"]
     },
     "4": {
       "role": "analyst",
@@ -67,7 +76,9 @@
     }
   },
   "storage": {
-    "results_subdir": "results/multisource_v1_core_3seeds",
-    "analysis_subdir": "analysis/multisource_v1_core_3seeds"
+    "results_subdir": "results/multisource_v1_core_seed42_split3",
+    "analysis_subdir": "analysis/multisource_v1_core_seed42_split3",
+    "exports_subdir": "exports",
+    "incoming_subdir": "incoming"
   }
 }

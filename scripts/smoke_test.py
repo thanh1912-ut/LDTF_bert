@@ -197,14 +197,34 @@ def run(argv: list[str] | None = None) -> int:
         train_config = TrainConfig(
             output_dir=output_dir,
             run_id="A0_smoke",
-            epochs=1,
+            epochs=2,
             use_amp=False,
             grad_accum_steps=2,
             data_signature={"train_sha256": "smoke"},
             architecture=reference.architecture_config(),
         )
-        first = train_model(reference, train_loader, val_loader, train_config)
-        check(first.best_epoch == 1, "training completed and selected an epoch")
+
+        class SmokeInterruption(RuntimeError):
+            pass
+
+        def interrupt_after_first_epoch(epoch: int, _record: dict[str, float]) -> None:
+            if epoch == 1:
+                raise SmokeInterruption("simulated Colab interruption")
+
+        try:
+            train_model(
+                reference,
+                train_loader,
+                val_loader,
+                train_config,
+                progress_callback=interrupt_after_first_epoch,
+            )
+        except SmokeInterruption:
+            pass
+        else:
+            raise AssertionError("smoke interruption was not triggered")
+
+        check(True, "simulated interruption happened after epoch one")
         check((output_dir / "best.pt").exists(), "best.pt was written")
         check((output_dir / "last.pt").exists(), "last.pt was written")
 
@@ -238,15 +258,7 @@ def run(argv: list[str] | None = None) -> int:
             build_model("A0"),
             build_train_dataloader(train_frame, tokenizer, batch_size=4, seed=0),
             build_eval_dataloader(val_frame, tokenizer, batch_size=4),
-            TrainConfig(
-                output_dir=output_dir,
-                run_id="A0_smoke",
-                epochs=2,
-                use_amp=False,
-                grad_accum_steps=2,
-                data_signature={"train_sha256": "smoke"},
-                architecture=reference.architecture_config(),
-            ),
+            train_config,
             resume=True,
         )
         check(resumed.resumed_from_epoch == 1, "resume continued from the last epoch")
