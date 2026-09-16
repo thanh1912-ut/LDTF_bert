@@ -1,0 +1,7 @@
+member_id,run,seed,status
+1,B2_bert_finetuned_cls,42,complete
+1,A0,42,complete
+2,A1,42,complete
+2,A3,42,complete
+3,A4,42,complete
+3,A11,42,complete

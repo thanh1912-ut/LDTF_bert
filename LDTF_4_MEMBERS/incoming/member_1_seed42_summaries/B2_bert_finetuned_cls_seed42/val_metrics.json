@@ -1,0 +1,50 @@
+{
+  "run_id": "B2_bert_finetuned_cls_seed42",
+  "best_epoch": 3,
+  "best_metrics": {
+    "f1_macro": 0.9486156611425511,
+    "accuracy": 0.9486258457940022,
+    "loss": 0.1880122227792642
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "global_step": 3408,
+      "train_loss": 0.26276486159899476,
+      "val_loss": 0.16817791976184637,
+      "val_accuracy": 0.9421100994069,
+      "val_f1_macro": 0.9419609555087685,
+      "learning_rate_backbone": 1.4814170832427735e-05,
+      "learning_rate_head": 0.0007407085416213867,
+      "epoch_time_sec": 2561.26,
+      "peak_vram_gb": 3.9938,
+      "skipped_steps": 0
+    },
+    {
+      "epoch": 2,
+      "global_step": 6816,
+      "train_loss": 0.13670718684651612,
+      "val_loss": 0.1610055154312544,
+      "val_accuracy": 0.9477069584830006,
+      "val_f1_macro": 0.9477309423944384,
+      "learning_rate_backbone": 7.407085416213868e-06,
+      "learning_rate_head": 0.00037035427081069335,
+      "epoch_time_sec": 2568.77,
+      "peak_vram_gb": 3.9938,
+      "skipped_steps": 0
+    },
+    {
+      "epoch": 3,
+      "global_step": 10224,
+      "train_loss": 0.08531526620009447,
+      "val_loss": 0.1880122227792642,
+      "val_accuracy": 0.9486258457940022,
+      "val_f1_macro": 0.9486156611425511,
+      "learning_rate_backbone": 0.0,
+      "learning_rate_head": 0.0,
+      "epoch_time_sec": 2573.39,
+      "peak_vram_gb": 3.9938,
+      "skipped_steps": 0
+    }
+  ]
+}

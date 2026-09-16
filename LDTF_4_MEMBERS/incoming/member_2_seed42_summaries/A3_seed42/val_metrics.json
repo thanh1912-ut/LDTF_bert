@@ -1,0 +1,50 @@
+{
+  "run_id": "A3_seed42",
+  "best_epoch": 3,
+  "best_metrics": {
+    "f1_macro": 0.9468078212608806,
+    "accuracy": 0.94687160638209,
+    "loss": 0.1887756140546167
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "global_step": 3408,
+      "train_loss": 0.31207666856215205,
+      "val_loss": 0.18102661448606083,
+      "val_accuracy": 0.9400217191546236,
+      "val_f1_macro": 0.9399058631081715,
+      "learning_rate_backbone": 1.4814170832427735e-05,
+      "learning_rate_head": 0.0007407085416213867,
+      "epoch_time_sec": 2782.28,
+      "peak_vram_gb": 4.1804,
+      "skipped_steps": 0
+    },
+    {
+      "epoch": 2,
+      "global_step": 6816,
+      "train_loss": 0.15090266400725483,
+      "val_loss": 0.17133541848464137,
+      "val_accuracy": 0.9458691838609974,
+      "val_f1_macro": 0.9458277314480046,
+      "learning_rate_backbone": 7.407085416213868e-06,
+      "learning_rate_head": 0.00037035427081069335,
+      "epoch_time_sec": 2787.34,
+      "peak_vram_gb": 4.1804,
+      "skipped_steps": 0
+    },
+    {
+      "epoch": 3,
+      "global_step": 10224,
+      "train_loss": 0.10149187609200594,
+      "val_loss": 0.1887756140546167,
+      "val_accuracy": 0.94687160638209,
+      "val_f1_macro": 0.9468078212608806,
+      "learning_rate_backbone": 0.0,
+      "learning_rate_head": 0.0,
+      "epoch_time_sec": 2791.62,
+      "peak_vram_gb": 4.1804,
+      "skipped_steps": 0
+    }
+  ]
+}
