@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "status": "ready",
+  "evaluation_enabled": true,
+  "drive_root": "/content/drive/MyDrive/LDTF_4_MEMBERS",
+  "paths_relative_to": "LDTF_4_MEMBERS",
+  "run_id": "B2_bert_finetuned_cls_seed42",
+  "seed": 42,
+  "expected_best_epoch": 3,
+  "selection_metric": "val_f1_macro",
+  "expected_validation_f1": 0.9486156611425511,
+  "checkpoint": "final_test/inputs/B2_bert_finetuned_cls_seed42/best.pt",
+  "checkpoint_sha256": "54bf29925a49a7ee00c3c4c32fb6816fb17eca5c3b772de386218b546b625eee",
+  "test_file": "final_test/inputs/research_test.parquet",
+  "test_sha256": "ee6bad1e03b7cb2a71f1df88e91249d16c77b403339be867972b309217e0d797",
+  "expected_test_rows": 7600,
+  "selection_evidence": "final_test/inputs/selection",
+  "output_dir": "final_test/B2_bert_finetuned_cls_seed42",
+  "model_name": "bert-base-uncased",
+  "model_class": "BertPooledClassifier",
+  "pooling": "cls",
+  "max_length": 128,
+  "text_encoding": "single",
+  "eval_batch_size": 64,
+  "label_names": [
+    "World",
+    "Sports",
+    "Business",
+    "Sci/Tech"
+  ]
+}

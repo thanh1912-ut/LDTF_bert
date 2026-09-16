@@ -1,0 +1,64 @@
+{
+  "num_examples": 7600,
+  "accuracy": 0.9456578947368421,
+  "f1_macro": 0.9456521955326587,
+  "f1_weighted": 0.9456521955326584,
+  "confusion_matrix": [
+    [
+      1819,
+      8,
+      38,
+      35
+    ],
+    [
+      10,
+      1880,
+      6,
+      4
+    ],
+    [
+      38,
+      9,
+      1731,
+      122
+    ],
+    [
+      26,
+      7,
+      110,
+      1757
+    ]
+  ],
+  "per_class": {
+    "World": {
+      "precision": 0.9609086106708927,
+      "recall": 0.9573684210526315,
+      "f1": 0.9591352491431584,
+      "support": 1900
+    },
+    "Sports": {
+      "precision": 0.9873949579831933,
+      "recall": 0.9894736842105263,
+      "f1": 0.9884332281808622,
+      "support": 1900
+    },
+    "Business": {
+      "precision": 0.9183023872679045,
+      "recall": 0.9110526315789473,
+      "f1": 0.9146631439894319,
+      "support": 1900
+    },
+    "Sci/Tech": {
+      "precision": 0.916058394160584,
+      "recall": 0.9247368421052632,
+      "f1": 0.9203771608171818,
+      "support": 1900
+    }
+  },
+  "loss": 0.2039402723312378,
+  "run_id": "B2_bert_finetuned_cls_seed42",
+  "checkpoint_sha256": "54bf29925a49a7ee00c3c4c32fb6816fb17eca5c3b772de386218b546b625eee",
+  "test_sha256": "ee6bad1e03b7cb2a71f1df88e91249d16c77b403339be867972b309217e0d797",
+  "checkpoint_epoch": 3,
+  "inference_dtype": "float32"
+}

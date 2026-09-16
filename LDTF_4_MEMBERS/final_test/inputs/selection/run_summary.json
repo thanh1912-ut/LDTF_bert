@@ -1,0 +1,123 @@
+{
+  "run_id": "B2_bert_finetuned_cls_seed42",
+  "base_run": "B2_bert_finetuned_cls",
+  "seed": 42,
+  "backbone_frozen": false,
+  "epochs": 3,
+  "train_rows": 109031,
+  "is_debug_subset": false,
+  "parameter_counts": {
+    "backbone": {
+      "total": 108891648,
+      "trainable": 108891648,
+      "frozen": 0
+    },
+    "dropout": {
+      "total": 0,
+      "trainable": 0,
+      "frozen": 0
+    },
+    "classifier": {
+      "total": 3076,
+      "trainable": 3076,
+      "frozen": 0
+    },
+    "total": {
+      "total": 108894724,
+      "trainable": 108894724,
+      "frozen": 0,
+      "non_backbone": 3076
+    }
+  },
+  "optimizer_coverage": {
+    "num_trainable": 199,
+    "num_in_optimizer": 199,
+    "missing_trainable": 0,
+    "frozen_in_optimizer": 0,
+    "covered": true
+  },
+  "best_epoch": 3,
+  "best_val_f1_macro": 0.9486156611425511,
+  "best_val_accuracy": 0.9486258457940022,
+  "best_val_loss": 0.1880122227792642,
+  "total_train_seconds": 7767.51,
+  "session_train_seconds": 7767.51,
+  "peak_vram_gb": 3.9938,
+  "seconds_per_epoch": 2589.17,
+  "runtime": {
+    "world_size": 1,
+    "distributed_backend": "none",
+    "devices": [
+      "Tesla T4"
+    ],
+    "global_batch_size": 32,
+    "per_device_batch_size": 32,
+    "global_eval_batch_size": 64,
+    "per_device_eval_batch_size": 64,
+    "effective_global_batch_size": 32,
+    "num_workers_per_rank": 1,
+    "amp": true,
+    "amp_dtype": "bfloat16",
+    "deterministic": true,
+    "fused_optimizer": true,
+    "pad_to_multiple_of": 8,
+    "train_sampler_padding": 0
+  },
+  "data_signature": {
+    "train_sha256": "de4bddafcc5449b16a1c63b4dd89488c2ef15906194984b51812070e540d0601",
+    "validation_sha256": "78d96c6a809123ce4b0fed35d153939f3fc068dd0dcf139221faec3caec63fca",
+    "text_encoding": "single",
+    "max_length": "128",
+    "train_rows": "109031",
+    "limit_train_rows": "none",
+    "subsample_seed": "none"
+  },
+  "architecture": {
+    "class_name": "BertPooledClassifier",
+    "model_name": "bert-base-uncased",
+    "pooling": "cls",
+    "num_classes": 4,
+    "backbone_frozen": false
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "global_step": 3408,
+      "train_loss": 0.26276486159899476,
+      "val_loss": 0.16817791976184637,
+      "val_accuracy": 0.9421100994069,
+      "val_f1_macro": 0.9419609555087685,
+      "learning_rate_backbone": 1.4814170832427735e-05,
+      "learning_rate_head": 0.0007407085416213867,
+      "epoch_time_sec": 2561.26,
+      "peak_vram_gb": 3.9938,
+      "skipped_steps": 0
+    },
+    {
+      "epoch": 2,
+      "global_step": 6816,
+      "train_loss": 0.13670718684651612,
+      "val_loss": 0.1610055154312544,
+      "val_accuracy": 0.9477069584830006,
+      "val_f1_macro": 0.9477309423944384,
+      "learning_rate_backbone": 7.407085416213868e-06,
+      "learning_rate_head": 0.00037035427081069335,
+      "epoch_time_sec": 2568.77,
+      "peak_vram_gb": 3.9938,
+      "skipped_steps": 0
+    },
+    {
+      "epoch": 3,
+      "global_step": 10224,
+      "train_loss": 0.08531526620009447,
+      "val_loss": 0.1880122227792642,
+      "val_accuracy": 0.9486258457940022,
+      "val_f1_macro": 0.9486156611425511,
+      "learning_rate_backbone": 0.0,
+      "learning_rate_head": 0.0,
+      "epoch_time_sec": 2573.39,
+      "peak_vram_gb": 3.9938,
+      "skipped_steps": 0
+    }
+  ]
+}

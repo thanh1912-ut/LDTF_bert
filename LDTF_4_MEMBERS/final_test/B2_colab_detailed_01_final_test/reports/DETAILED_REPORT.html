@@ -1,0 +1,268 @@
+<!doctype html><html lang="vi"><meta charset="utf-8"><title>Báo cáo đánh giá B2 trên tập test</title><style>body{font:16px Arial;max-width:1100px;margin:32px auto;padding:16px;color:#202528}table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:8px;border:1px solid #ccc;text-align:left;overflow-wrap:anywhere}img{max-width:100%;display:block;margin:24px auto}p{line-height:1.6}</style><h1>Báo cáo đánh giá B2 trên tập test</h1><p>Accuracy: 0.945658; Macro F1: 0.945652; đúng 7187/7600; sai 413. Accuracy CI95: 0.940526–0.950135; Macro F1 CI95: 0.940571–0.950232. ECE: 0.031692; Brier (tổng bốn lớp): 0.089448.</p><p>Đây là đánh giá lại checkpoint đã chốt, không phải thí nghiệm độc lập mới. Khoảng tin cậy bootstrap phản ánh biến động do lấy mẫu test, không đo độ ổn định qua seed huấn luyện. Xác suất softmax là mức tự tin của model, không phải bảo đảm đúng. ECE dùng 10 khoảng đều; Brier là tổng sai số bình phương trên bốn lớp. Phân tích độ dài dùng số từ tách bằng khoảng trắng, không phải token BERT. Test thuộc AG News; không dùng các lỗi test để chỉnh model rồi báo lại điểm trên cùng test.</p><h2>Chỉ số từng nhãn</h2><table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>label</th>
+      <th>precision</th>
+      <th>recall</th>
+      <th>f1</th>
+      <th>support</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>World</td>
+      <td>0.9609</td>
+      <td>0.9574</td>
+      <td>0.9591</td>
+      <td>1900.0000</td>
+    </tr>
+    <tr>
+      <td>Sports</td>
+      <td>0.9874</td>
+      <td>0.9895</td>
+      <td>0.9884</td>
+      <td>1900.0000</td>
+    </tr>
+    <tr>
+      <td>Business</td>
+      <td>0.9183</td>
+      <td>0.9111</td>
+      <td>0.9147</td>
+      <td>1900.0000</td>
+    </tr>
+    <tr>
+      <td>Sci/Tech</td>
+      <td>0.9161</td>
+      <td>0.9247</td>
+      <td>0.9204</td>
+      <td>1900.0000</td>
+    </tr>
+  </tbody>
+</table><img src="../figures/confusion_matrix.png" alt="confusion_matrix.png"><img src="../figures/confusion_matrix_normalized.png" alt="confusion_matrix_normalized.png"><img src="../figures/per_class_f1.png" alt="per_class_f1.png"><img src="../figures/calibration.png" alt="calibration.png"><h2>Cặp nhãn hay nhầm</h2><table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>true_label</th>
+      <th>predicted_label</th>
+      <th>count</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Business</td>
+      <td>Sci/Tech</td>
+      <td>122</td>
+    </tr>
+    <tr>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>110</td>
+    </tr>
+    <tr>
+      <td>World</td>
+      <td>Business</td>
+      <td>38</td>
+    </tr>
+    <tr>
+      <td>Business</td>
+      <td>World</td>
+      <td>38</td>
+    </tr>
+    <tr>
+      <td>World</td>
+      <td>Sci/Tech</td>
+      <td>35</td>
+    </tr>
+    <tr>
+      <td>Sci/Tech</td>
+      <td>World</td>
+      <td>26</td>
+    </tr>
+  </tbody>
+</table><h2>Kết quả theo độ dài văn bản (số từ)</h2><table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>count</th>
+      <th>accuracy</th>
+    </tr>
+    <tr>
+      <th>length_group</th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0-25</th>
+      <td>636</td>
+      <td>0.904088</td>
+    </tr>
+    <tr>
+      <th>26-50</th>
+      <td>6502</td>
+      <td>0.949093</td>
+    </tr>
+    <tr>
+      <th>51-100</th>
+      <td>443</td>
+      <td>0.961625</td>
+    </tr>
+    <tr>
+      <th>101+</th>
+      <td>19</td>
+      <td>0.789474</td>
+    </tr>
+  </tbody>
+</table><h2>20 mẫu sai tự tin nhất</h2><table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>row_index</th>
+      <th>text</th>
+      <th>true_label</th>
+      <th>predicted_label</th>
+      <th>confidence</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>912</td>
+      <td>Bryant Makes First Appearance at Trial (AP) AP - NBA star Kobe Bryant arrived at his sexual assault trial Monday as attorneys in the case who spent the weekend poring over questionnaires prepared to question potential jurors individually.</td>
+      <td>Sci/Tech</td>
+      <td>Sports</td>
+      <td>0.999993</td>
+    </tr>
+    <tr>
+      <td>5686</td>
+      <td>GAME UNDER FIRE Attacking police officers, racial slurs, bloody beatings of innocent bystanders ... is it really just a game? In four and a half minutes, 14-year-old Ryan Mason ran over a police officer, stole his gun and shot and killed three innocent bystanders.</td>
+      <td>Sci/Tech</td>
+      <td>Sports</td>
+      <td>0.999965</td>
+    </tr>
+    <tr>
+      <td>4815</td>
+      <td>Blame player, not game It was like nothing youd ever exercised your thumbs to before. You could do whatever you wanted, whenever you wanted. The game seemed endless.</td>
+      <td>Sci/Tech</td>
+      <td>Sports</td>
+      <td>0.999954</td>
+    </tr>
+    <tr>
+      <td>3077</td>
+      <td>Brewers buyer expected to step out of the shadows Monday MILWAUKEE - Paul Attanasio says the story of his brother buying a baseball team is like a script straight out of Hollywood. He should know.</td>
+      <td>Business</td>
+      <td>Sports</td>
+      <td>0.999947</td>
+    </tr>
+    <tr>
+      <td>2660</td>
+      <td>Gas prices up 5 cents after Hurricane Ivan CAMARILLO, Calif. - Gas prices jumped more than 5 cents a gallon in the past two weeks, largely because of supply problems related to Hurricane Ivan, an industry analyst said.</td>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>0.999919</td>
+    </tr>
+    <tr>
+      <td>2126</td>
+      <td>Bush Scraps Most U.S. Sanctions on Libya (Reuters) Reuters - President Bush on Monday formally ended the U.S. trade embargo on Libya to reward it for giving up weapons of mass destruction but left in place U.S. terrorism-related sanctions.</td>
+      <td>Sci/Tech</td>
+      <td>World</td>
+      <td>0.999895</td>
+    </tr>
+    <tr>
+      <td>664</td>
+      <td>TiVo loss widens SAN FRANCISCO (CBS.MW) - TiVo said its second-quarter loss widened from a year earlier on higher customer acquisition costs. Free!</td>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>0.999886</td>
+    </tr>
+    <tr>
+      <td>4097</td>
+      <td>Greenspan: Debt, home prices not dangerous The record level of debt carried by American households and soaring home prices do not appear to represent serious threats to the US economy, Federal Reserve Chairman Alan Greenspan said Tuesday.</td>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>0.999874</td>
+    </tr>
+    <tr>
+      <td>5145</td>
+      <td>Serial HIV Assault Verdict Expected Mon. (AP) AP - A verdict will be announced Monday in the trial of a man charged with intentionally exposing 17 women to HIV, a county judge said.</td>
+      <td>Sci/Tech</td>
+      <td>World</td>
+      <td>0.999854</td>
+    </tr>
+    <tr>
+      <td>248</td>
+      <td>Caterpillar snaps up another remanufacturer of engines PEORIA - Caterpillar Inc. said Wednesday it will acquire a South Carolina remanufacturer of engines and automatic transmissions, increasing its US employment base by 500 people.</td>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>0.999810</td>
+    </tr>
+    <tr>
+      <td>4550</td>
+      <td>Lockheed Profit Jumps on IT, Jet Demand NEW YORK (Reuters) - No. 1 U.S. defense contractor Lockheed Martin Corp. LMT.N reported a 41 percent rise in quarterly profit on Tuesday, beating Wall Street forecasts, as demand soared for its combat aircraft and information technology services.</td>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>0.999808</td>
+    </tr>
+    <tr>
+      <td>5127</td>
+      <td>Another homicide in Holland It is a sad day. In what seems to be another politically inspired homicide in Holland, Dutch filmmaker, and controversial columnist Theo van Gogh was brutally murdered in the streets of Amsterdam this morning.</td>
+      <td>Sci/Tech</td>
+      <td>World</td>
+      <td>0.999760</td>
+    </tr>
+    <tr>
+      <td>4396</td>
+      <td>Revolving Door IN Aylwin B. Lewis, president of Yum Brands, as chief executive of Kmart.</td>
+      <td>World</td>
+      <td>Business</td>
+      <td>0.999711</td>
+    </tr>
+    <tr>
+      <td>6108</td>
+      <td>Bush Signs Into Law Debt Ceiling Increase WASHINGTON (Reuters) - President Bush on Friday signed intolaw a measure authorizing an $800 billion increase in thecredit limit of the United States, the White House said.</td>
+      <td>World</td>
+      <td>Business</td>
+      <td>0.999677</td>
+    </tr>
+    <tr>
+      <td>6247</td>
+      <td>Before-the-Bell: GenCorp Falls 5.6 Pct. (Reuters) Reuters - Shares of GenCorp Inc. fell 5.6 percent before the opening bell on Monday after investment fund Steel Partners withdrew its proposal to acquire the aerospace and real estate company.</td>
+      <td>Sci/Tech</td>
+      <td>Business</td>
+      <td>0.999662</td>
+    </tr>
+    <tr>
+      <td>5433</td>
+      <td>(B)old new frontiers Northrop Grumman Corp. and Boeing Co. yesterday announced plans to team up to design a vehicle to take astronauts back to the moon and even beyond, but they've got to make one stop first</td>
+      <td>Business</td>
+      <td>Sci/Tech</td>
+      <td>0.999561</td>
+    </tr>
+    <tr>
+      <td>6185</td>
+      <td>Special to ESPN.com It's the age old question: quot;What do you give to the man who's been everything? quot;. Only time will tell whether Phil Knight's retirement will be as long-lived as so many players he paid to endorse Nike.</td>
+      <td>Business</td>
+      <td>Sports</td>
+      <td>0.999511</td>
+    </tr>
+    <tr>
+      <td>1269</td>
+      <td>Philippines mourns dead in Russian school siege The Philippines Saturday expressed quot;deepest sympathy quot; to the families of the dead in the Russian school siege on Friday, in which 322 people were killed when Russian troops stormed</td>
+      <td>Sci/Tech</td>
+      <td>World</td>
+      <td>0.999504</td>
+    </tr>
+    <tr>
+      <td>4854</td>
+      <td>Times to Scrap Broadsheet Edition The Times is to scrap its broadsheet edition and go tabloid from Monday, it was confirmed today. The decision was made after a trial run of the compact edition proved a success, said editor Robert Thomson.</td>
+      <td>Sports</td>
+      <td>Sci/Tech</td>
+      <td>0.999469</td>
+    </tr>
+    <tr>
+      <td>311</td>
+      <td>French Take Gold, Bronze in Single Kayak ATHENS, Greece - Winning on whitewater runs in the family for Frenchman Benoit Peschier, though an Olympic gold is something new. Peschier paddled his one-man kayak aggressively but penalty free in both his semifinal and final runs on the manmade Olympic ...</td>
+      <td>Sports</td>
+      <td>World</td>
+      <td>0.999434</td>
+    </tr>
+  </tbody>
+</table></html>
