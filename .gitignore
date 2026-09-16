@@ -5,6 +5,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-gpu/
+LDTF_4_MEMBERS/final_test/local_runs/
 venv/
 env/
 *.egg-info/

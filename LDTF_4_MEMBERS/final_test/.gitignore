@@ -1,0 +1,5 @@
+inputs/*.parquet
+*_final_test.zip
+B2_bert_finetuned_cls_seed42/**
+!B2_bert_finetuned_cls_seed42/**/
+!B2_bert_finetuned_cls_seed42/**/.gitkeep

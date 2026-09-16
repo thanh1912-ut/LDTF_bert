@@ -1,0 +1,13 @@
+true_label,predicted_label,count
+Business,Sci/Tech,122
+Sci/Tech,Business,110
+World,Business,38
+Business,World,38
+World,Sci/Tech,35
+Sci/Tech,World,26
+Sports,World,10
+Business,Sports,9
+World,Sports,8
+Sci/Tech,Sports,7
+Sports,Business,6
+Sports,Sci/Tech,4

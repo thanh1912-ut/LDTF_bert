@@ -35,6 +35,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def evaluate_package(workflow):
+    """Notebook entry point; the workflow opens the existing guarded test loader."""
+    workflow.evaluate()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if int(os.environ.get("WORLD_SIZE", "1")) > 1:
