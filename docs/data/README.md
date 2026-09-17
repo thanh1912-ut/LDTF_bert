@@ -2,6 +2,11 @@
 
 Đây là trang bắt đầu cho toàn bộ tài liệu về bộ dữ liệu `multisource-v1`.
 
+Nếu muốn đọc một tài liệu duy nhất bao quát toàn bộ dữ liệu, xem
+[BAO_CAO_TONG_HOP_DU_LIEU.md](BAO_CAO_TONG_HOP_DU_LIEU.md). Báo cáo này tổng
+hợp nguồn, số lượng, schema, pipeline, cơ sở xử lý, chất lượng, checksum, cách
+sử dụng và các giới hạn của dataset.
+
 ## Thứ tự đọc đề xuất
 
 ### 1. Hiểu bộ dữ liệu đang có gì
@@ -83,6 +88,7 @@ DATA_DICTIONARY.md → PROCESSING_PIPELINE.md
 
 | Tài liệu | Câu hỏi chính | Mức độ |
 | --- | --- | --- |
+| [BAO_CAO_TONG_HOP_DU_LIEU.md](BAO_CAO_TONG_HOP_DU_LIEU.md) | Toàn bộ thông tin dữ liệu trong một báo cáo | Tổng hợp |
 | [DATASET_CARD.md](DATASET_CARD.md) | Dataset gồm những gì? | Cơ bản |
 | [DATA_DICTIONARY.md](DATA_DICTIONARY.md) | Mỗi cột có nghĩa gì? | Cơ bản |
 | [PROCESSING_PIPELINE.md](PROCESSING_PIPELINE.md) | Dữ liệu được xử lý ra sao? | Trung bình |
